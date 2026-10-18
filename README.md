@@ -2,6 +2,15 @@
 
 A clean FastAPI/SQLite workspace for fashion orders, customer records, collections, payments, shipping, product images, Excel exports, and customer PDFs.
 
+## Start here (testing copy, 2026-10-18)
+
+- Everyday work: **Intake** (`/intake`) — upload or describe, answer the questions, correct, save once,
+  download Excel. Guide: [docs/operator-guide.md](docs/operator-guide.md).
+- Google Drive and Gmail: [docs/drive-gmail-setup.md](docs/drive-gmail-setup.md) (account setup pending).
+- Backups and restore: [docs/backup-restore.md](docs/backup-restore.md).
+- What changed, how it was checked, what remains: [docs/IMPLEMENTATION_PROGRESS.md](docs/IMPLEMENTATION_PROGRESS.md).
+- Run: `start-local.ps1` (127.0.0.1:8001). Tests: `..lina-fashion\.venv\Scripts\python.exe -m pytest -q`.
+
 ## What is included
 
 - a deliberately empty SQLite database: upload a master workbook to start any season from a fresh base;

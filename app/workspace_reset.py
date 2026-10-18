@@ -25,12 +25,15 @@ from sqlalchemy.orm import Session
 from app.config import ROOT_DIR
 from app.database import Base
 from app.models import (
-    AuditLog, Customer, FactoryPayment, ImportBatch, ImportChange, ImportReview, OrderItem, Payment, PaymentAllocation,
+    AuditLog, ConnectionSource, Customer, FactoryPayment, ImportBatch, ImportChange, ImportReview, OrderItem, Payment, PaymentAllocation,
     ReadyBatch, Season, ShipmentItem,
 )
 from app.recovery import SnapshotInfo, create_snapshot
 
 RESET_PHRASE = "RESET WORKSPACE"
+# Account connections, their selections and the worker lease are settings, not business records: a reset
+# keeps them (tokens stay protected and can be disconnected on the Connections page).
+KEPT_TABLES = {"connections", "connection_sources", "worker_leases"}
 MANAGED_DIRECTORIES = ("data/imports", "data/images", "data/staged-images", "data/library", "data/reports",
                        "data/intake-sources", "data/sources", "data/excel-exchange", "output/pdf")
 CATEGORIES = {
@@ -42,6 +45,7 @@ CATEGORIES = {
     "Intake drafts and evidence": ["intake_confirmations", "intake_sessions", "intake_messages", "source_items", "source_blobs",
                                    "draft_rows", "draft_questions", "operation_receipts"],
     "Audit history": ["audit_logs"],
+    "Background work and uploads": ["jobs", "sync_runs", "outbox_items"],
 }
 
 
@@ -62,7 +66,7 @@ def reset_scope(db: Session, root: Path | None = None) -> ResetScope:
     for category, names in CATEGORIES.items():
         counts = {name: db.scalar(select(func.count()).select_from(present[name])) or 0 for name in names if name in present}
         tables[category] = {name: count for name, count in counts.items() if count}
-    other = [name for name in present if not any(name in names for names in CATEGORIES.values())]
+    other = [name for name in present if not any(name in names for names in CATEGORIES.values()) and name not in KEPT_TABLES]
     extra = {name: db.scalar(select(func.count()).select_from(present[name])) or 0 for name in other}
     if any(extra.values()):
         tables["Other records"] = {name: count for name, count in extra.items() if count}
@@ -97,7 +101,10 @@ def reset_workspace(db: Session, confirmation: str, root: Path | None = None) ->
     snapshot = create_snapshot(db, reason="Before whole-workspace reset", root=root)
     try:
         for table in reversed(Base.metadata.sorted_tables):
-            db.execute(table.delete())
+            if table.name not in KEPT_TABLES:
+                db.execute(table.delete())
+        for source in db.scalars(select(ConnectionSource)).all():
+            source.checkpoint, source.checkpoint_kind = None, None  # Evidence was removed: capture again from scratch.
         db.commit()
     except Exception:
         db.rollback()

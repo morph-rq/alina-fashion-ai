@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     background_worker: bool = True
     # Address this app is opened at; the Google OAuth redirect URI is derived from it.
     public_base_url: str = "http://127.0.0.1:8001"
+    # Extra host names this app may be addressed by (comma separated), besides loopback and public_base_url.
+    allowed_hosts: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
     google_api_key: str = ""   # Browser key for the Google Picker (restricted to this origin in Google Cloud).

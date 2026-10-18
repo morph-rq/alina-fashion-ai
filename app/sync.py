@@ -1,14 +1,16 @@
 """Incremental capture from Google Drive and Gmail into the source inbox.
 
-Checkpoint rule: a checkpoint (Drive page token, Gmail history id) is saved in
-the same transaction as the items observed up to it. Every observed item is
-either stored, recognised as already stored, or recorded as a failed inbox item
-with a retry job. A crash before commit leaves the old checkpoint, and replays
-are recognised by remote identity, so nothing is skipped or duplicated.
+Checkpoint rule: every observed item is committed (stored, recognised as already
+stored, or recorded as a failed/ignored inbox item, with a retry job where a
+retry can help) before the checkpoint that covers it is saved. Network work
+happens with no write transaction open; each item is committed on its own, so
+syncing never holds the database lock during downloads. A crash leaves the
+previous checkpoint, and replays are recognised by remote identity, so nothing
+is skipped or duplicated.
 
 Remote changes never delete or overwrite accounting facts: a changed Drive file
-becomes a new evidence version; a removed or unshared file is noted on the
-source, and its earlier captures remain.
+becomes a new evidence version; a removed or unshared file is noted on its
+earlier captures, which remain.
 """
 from __future__ import annotations
 
@@ -45,38 +47,52 @@ def _supported(meta: dict) -> bool:
     return meta.get("mimeType") in SUPPORTED_DOWNLOADS or meta.get("mimeType") in EXPORT_FORMATS
 
 
+def _commit(db: Session) -> None:
+    db.commit()
+    jobs.heartbeat()
+
+
+def _record(db: Session, **values) -> None:
+    """Record an inbox item that could not be stored normally (failed or ignored)."""
+    source_store.capture(db, content=None, **values)
+
+
 def capture_drive_file(db: Session, connection: Connection, drive: DriveClient, meta: dict, run: SyncRun, origin: str) -> None:
-    run.seen += 1
     version = _version(meta)
-    if source_store.find_item(db, "drive", connection.account_email, meta["id"], version):
+    with db.no_autoflush:  # Nothing may be written (and lock the database) before the download below.
+        known = source_store.find_item(db, "drive", connection.account_email, meta["id"], version)
+    run.seen += 1
+    if known:
         run.duplicates += 1
         return
+    common = dict(channel="drive", account=connection.account_email, remote_id=meta["id"], remote_version=version,
+                  original_name=meta.get("name", ""), source_link=meta.get("webViewLink"))
     metadata = {"drive_name": meta.get("name"), "mime_type": meta.get("mimeType"), "modified_time": meta.get("modifiedTime"),
                 "md5": meta.get("md5Checksum"), "origin": origin}
     if not _supported(meta):
-        source_store.capture(db, channel="drive", content=None, account=connection.account_email, remote_id=meta["id"],
-                             remote_version=version, original_name=meta.get("name", ""), media_type=meta.get("mimeType"),
-                             metadata=metadata, source_link=meta.get("webViewLink"), state="ignored",
-                             state_reason=f"Unsupported file type {meta.get('mimeType')}")
+        _record(db, media_type=meta.get("mimeType"), metadata=metadata, state="ignored",
+                state_reason=f"Unsupported file type {meta.get('mimeType')}", **common)
+        _commit(db)
         return
     try:
-        content, media_type, extra = drive.download(meta)
-        name = meta.get("name", "drive-file")
+        content, media_type, extra = drive.download(meta)  # No write transaction is open here.
         if extra.get("export_format"):
-            name += EXPORT_FORMATS[meta["mimeType"]][1]
-        source_store.capture(db, channel="drive", content=content, account=connection.account_email, remote_id=meta["id"],
-                             remote_version=version, original_name=name, media_type=media_type, metadata=metadata | extra,
-                             source_link=meta.get("webViewLink"))
+            common["original_name"] = common["original_name"] + EXPORT_FORMATS[meta["mimeType"]][1]
+        source_store.capture(db, content=content, media_type=media_type, metadata=metadata | extra, **common)
         run.captured += 1
-    except (GoogleError, source_store.CaptureError) as exc:
-        if isinstance(exc, GoogleError) and exc.reconnect:
+    except source_store.CaptureError as exc:  # For example larger than the storage limit: not retryable.
+        db.rollback()
+        _record(db, media_type=meta.get("mimeType"), metadata=metadata, state="failed", state_reason=str(exc), **common)
+        run.failed += 1
+    except GoogleError as exc:
+        if exc.reconnect:
             raise
-        source_store.capture(db, channel="drive", content=None, account=connection.account_email, remote_id=meta["id"],
-                             remote_version=version, original_name=meta.get("name", ""), media_type=meta.get("mimeType"),
-                             metadata=metadata, source_link=meta.get("webViewLink"), state="failed", state_reason=str(exc))
+        db.rollback()
+        _record(db, media_type=meta.get("mimeType"), metadata=metadata, state="failed", state_reason=str(exc), **common)
         jobs.enqueue(db, "drive.fetch", {"connection_id": connection.id, "file_id": meta["id"], "version": version},
                      dedupe_key=f"drive.fetch:{connection.account_email}:{meta['id']}:{version}", delay_seconds=60)
         run.failed += 1
+    _commit(db)
 
 
 def _note_removed(db: Session, connection: Connection, file_id: str, run: SyncRun) -> None:
@@ -88,13 +104,11 @@ def _note_removed(db: Session, connection: Connection, file_id: str, run: SyncRu
         item.metadata_json = json.dumps(metadata)
     if previous:
         run.note = ((run.note or "") + f" File {file_id} was removed or unshared at the source; its stored evidence is kept.").strip()
+    _commit(db)
 
 
-def sync_drive(db: Session, source: ConnectionSource, drive: DriveClient) -> SyncRun:
+def sync_drive(db: Session, source: ConnectionSource, drive: DriveClient, run: SyncRun) -> None:
     connection = source.connection
-    run = SyncRun(source_id=source.id)
-    db.add(run)
-    db.flush()
     if source.kind == "drive_file":
         try:
             meta = drive.get(source.remote_id)
@@ -102,80 +116,101 @@ def sync_drive(db: Session, source: ConnectionSource, drive: DriveClient) -> Syn
             if exc.status == 404:
                 source.last_error = "The file is no longer shared with this app or was deleted. Earlier captures are kept."
                 _note_removed(db, connection, source.remote_id, run)
-                run.status = "partial"
-                return run
+                return
             raise
         if meta.get("trashed"):
             _note_removed(db, connection, source.remote_id, run)
         else:
             capture_drive_file(db, connection, drive, meta, run, f"selected file {source.name}")
-    elif source.kind == "drive_folder":
-        if not source.checkpoint:
-            # Take the change token first, so nothing that changes during the listing is missed.
-            token = drive.start_page_token()
-            for meta in drive.list_folder(source.remote_id):
-                capture_drive_file(db, connection, drive, meta, run, f"folder {source.name}")
-            source.checkpoint, source.checkpoint_kind = token, "drive_changes"
-        else:
-            token = source.checkpoint
-            while token:
-                page = drive.changes_page(token)
-                for change in page.get("changes", []):
-                    meta = change.get("file") or {}
-                    if change.get("removed") or meta.get("trashed"):
-                        _note_removed(db, connection, change.get("fileId"), run)
-                    elif source.remote_id in (meta.get("parents") or []):
-                        capture_drive_file(db, connection, drive, meta, run, f"folder {source.name}")
-                if page.get("nextPageToken"):
-                    token = page["nextPageToken"]
-                    source.checkpoint = token  # Resumable mid-listing checkpoint, saved with this page's captures.
-                    db.commit()
-                else:
-                    source.checkpoint = page.get("newStartPageToken") or token
-                    token = None
-    run.status = "partial" if run.failed else "ok"
-    return run
-
-
-def capture_gmail_message(db: Session, connection: Connection, gmail: GmailClient, message_id: str, run: SyncRun, query: str) -> None:
-    run.seen += 1
-    if source_store.find_item(db, "gmail", connection.account_email, message_id, ""):
-        run.duplicates += 1
         return
+    if not source.checkpoint:
+        # Take the change token first, so nothing that changes during the listing is missed.
+        token = drive.start_page_token()
+        for meta in drive.list_folder(source.remote_id):
+            capture_drive_file(db, connection, drive, meta, run, f"folder {source.name}")
+        source.checkpoint, source.checkpoint_kind = token, "drive_changes"
+        _commit(db)
+        return
+    token = source.checkpoint
+    while token:
+        page = drive.changes_page(token)
+        for change in page.get("changes", []):
+            meta = change.get("file") or {}
+            if change.get("removed") or meta.get("trashed"):
+                _note_removed(db, connection, change.get("fileId"), run)
+            elif source.remote_id in (meta.get("parents") or []):
+                capture_drive_file(db, connection, drive, meta, run, f"folder {source.name}")
+        # Every change on this page is committed; the token may now move past it.
+        token = page.get("nextPageToken")
+        source.checkpoint = token or page.get("newStartPageToken") or source.checkpoint
+        _commit(db)
+
+
+def capture_gmail_message(db: Session, connection: Connection, gmail: GmailClient, message_id: str, run: SyncRun, query: str) -> bool:
+    """Store one message and its attachments. Returns False only if fetching failed (retry queued)."""
+    with db.no_autoflush:
+        known = source_store.find_item(db, "gmail", connection.account_email, message_id, "")
+    run.seen += 1
+    if known:
+        run.duplicates += 1
+        return True
+    common = dict(channel="gmail", account=connection.account_email, remote_id=message_id)
     try:
         body = gmail.raw_message(message_id)
         raw = base64.urlsafe_b64decode(body["raw"] + "=" * (-len(body["raw"]) % 4))
     except GoogleError as exc:
         if exc.reconnect:
             raise
-        source_store.capture(db, channel="gmail", content=None, account=connection.account_email, remote_id=message_id,
-                             original_name=f"message {message_id}", media_type="message/rfc822", state="failed", state_reason=str(exc),
-                             metadata={"query": query})
+        _record(db, original_name=f"message {message_id}", media_type="message/rfc822", state="failed", state_reason=str(exc),
+                metadata={"query": query}, **common)
         jobs.enqueue(db, "gmail.fetch", {"connection_id": connection.id, "message_id": message_id, "query": query},
                      dedupe_key=f"gmail.fetch:{connection.account_email}:{message_id}", delay_seconds=60)
         run.failed += 1
-        return
-    parsed = parse_message(raw)
-    metadata = {"subject": parsed.subject, "sender": parsed.sender, "recipients": parsed.recipients, "date": parsed.date,
-                "message_id_header": parsed.message_id_header, "thread_id": body.get("threadId"), "label_ids": body.get("labelIds", []),
-                "internal_date": body.get("internalDate"), "query": query, "body_text": parsed.body_text,
-                "attachments": [attachment.filename for attachment in parsed.attachments]}
-    message = source_store.capture(db, channel="gmail", content=raw, account=connection.account_email, remote_id=message_id,
-                                   original_name=(parsed.subject or f"message {message_id}")[:300], media_type="message/rfc822",
-                                   metadata=metadata, source_link=f"https://mail.google.com/mail/u/0/#all/{message_id}").item
-    for index, attachment in enumerate(parsed.attachments):
-        remote_id = f"{message_id}:{index}"
-        common = dict(channel="gmail", account=connection.account_email, remote_id=remote_id, original_name=attachment.filename,
-                      media_type=attachment.media_type, parent_id=message.id,
-                      metadata={"message_id": message_id, "content_id": attachment.content_id, "inline": attachment.inline})
+        _commit(db)
+        return False
+    try:
+        parsed = parse_message(raw)
+    except Exception as exc:  # noqa: BLE001 - a malformed message must not block the source
+        parsed, parse_problem = None, f"Message could not be parsed ({type(exc).__name__})"
+    else:
+        parse_problem = None
+    metadata = {"thread_id": body.get("threadId"), "label_ids": body.get("labelIds", []), "internal_date": body.get("internalDate"),
+                "query": query, "size_bytes": len(raw)}
+    if parsed is not None:
+        metadata |= {"subject": parsed.subject, "sender": parsed.sender, "recipients": parsed.recipients, "date": parsed.date,
+                     "message_id_header": parsed.message_id_header, "body_text": parsed.body_text,
+                     "attachments": [attachment.filename for attachment in parsed.attachments]}
+    name = ((parsed.subject if parsed else "") or f"message {message_id}")[:300]
+    link = f"https://mail.google.com/mail/u/0/#all/{message_id}"
+    try:
+        message = source_store.capture(db, content=raw, original_name=name, media_type="message/rfc822", metadata=metadata,
+                                       source_link=link, state="failed" if parse_problem else "captured",
+                                       state_reason=parse_problem, **common).item
+    except source_store.CaptureError as exc:  # Too large to store: visible, not retried endlessly.
+        db.rollback()
+        _record(db, original_name=name, media_type="message/rfc822", metadata=metadata, source_link=link, state="failed",
+                state_reason=str(exc), **common)
+        run.failed += 1
+        _commit(db)
+        return True
+    for index, attachment in enumerate(parsed.attachments if parsed else []):
+        child = dict(channel="gmail", account=connection.account_email, remote_id=f"{message_id}:{index}",
+                     original_name=attachment.filename, media_type=attachment.media_type, parent_id=message.id,
+                     metadata={"message_id": message_id, "content_id": attachment.content_id, "inline": attachment.inline})
         if attachment.problem:
-            source_store.capture(db, content=None, state="failed", state_reason=attachment.problem, **common)
-            run.failed += 1
-        elif attachment.media_type not in ATTACHMENT_TYPES:
-            source_store.capture(db, content=attachment.content, state="ignored", state_reason=f"Unsupported attachment type {attachment.media_type}", **common)
-        else:
-            source_store.capture(db, content=attachment.content, **common)
+            _record(db, state="failed", state_reason=attachment.problem, **child)
+            run.note = ((run.note or "") + f" An attachment of message {message_id} could not be decoded.").strip()
+            continue
+        state, reason = "captured", None
+        if attachment.media_type not in ATTACHMENT_TYPES:
+            state, reason = "ignored", f"Unsupported attachment type {attachment.media_type}"
+        try:
+            source_store.capture(db, content=attachment.content, state=state, state_reason=reason, **child)
+        except source_store.CaptureError as exc:
+            _record(db, state="failed", state_reason=str(exc), **child)
     run.captured += 1
+    _commit(db)
+    return True
 
 
 def _gmail_query(source: ConnectionSource) -> str:
@@ -185,46 +220,43 @@ def _gmail_query(source: ConnectionSource) -> str:
     return query
 
 
-def sync_gmail(db: Session, source: ConnectionSource, gmail: GmailClient) -> SyncRun:
+def sync_gmail(db: Session, source: ConnectionSource, gmail: GmailClient, run: SyncRun) -> None:
     connection = source.connection
-    run = SyncRun(source_id=source.id)
-    db.add(run)
-    db.flush()
     query = _gmail_query(source)
     if source.checkpoint_kind == "gmail_history" and source.checkpoint:
         try:
-            candidate_ids: list[str] = []
+            candidates: list[str] = []
             page_token, latest = None, source.checkpoint
             while True:
                 page = gmail.history_page(source.checkpoint, page_token)
                 latest = page.get("historyId", latest)
                 for record in page.get("history", []):
-                    for added in record.get("messagesAdded", []):
-                        candidate_ids.append(added["message"]["id"])
+                    # New mail, and mail that gains a label later (for example label:alina-orders added by hand).
+                    for entry in record.get("messagesAdded", []) + record.get("labelsAdded", []):
+                        candidates.append(entry["message"]["id"])
                 page_token = page.get("nextPageToken")
                 if not page_token:
                     break
-            if candidate_ids:
-                # History is not filtered by query; keep only messages that match the operator's query.
-                since = (now() - timedelta(days=30)).strftime("%Y/%m/%d")
-                matching = {message_id for message_id, _token in gmail.list_ids(f"{query} after:{since}".strip())}
-                for message_id in dict.fromkeys(candidate_ids):
+            if candidates:
+                # History is not filtered by the query: keep candidates that match it within the import boundary.
+                matching = {message_id for message_id, _token in gmail.list_ids(query)}
+                for message_id in dict.fromkeys(candidates):
                     if message_id in matching:
                         capture_gmail_message(db, connection, gmail, message_id, run, query)
             source.checkpoint = str(latest)
+            _commit(db)
+            return
         except GoogleError as exc:
             if exc.status != 404:
                 raise
             # History is no longer available: a bounded, visible full resync; captured messages are recognised.
             run.note = "Gmail history expired; performed a full resync bounded by the start date. Already captured messages were skipped."
             source.checkpoint, source.checkpoint_kind = None, None
-    if source.checkpoint_kind != "gmail_history":
-        history_id = gmail.profile()["historyId"]  # Taken before listing so later mail is caught by history.
-        for message_id, _token in gmail.list_ids(query):
-            capture_gmail_message(db, connection, gmail, message_id, run, query)
-        source.checkpoint, source.checkpoint_kind = str(history_id), "gmail_history"
-    run.status = "partial" if run.failed else "ok"
-    return run
+    history_id = gmail.profile()["historyId"]  # Taken before listing so later mail is caught by history.
+    for message_id, _token in gmail.list_ids(query):
+        capture_gmail_message(db, connection, gmail, message_id, run, query)
+    source.checkpoint, source.checkpoint_kind = str(history_id), "gmail_history"
+    _commit(db)
 
 
 def _record_failure(db: Session, source: ConnectionSource, exc: GoogleError) -> None:
@@ -238,31 +270,35 @@ def run_source_sync(db: Session, source_id: int) -> dict:
     source = db.get(ConnectionSource, source_id)
     if source is None or not source.active or source.connection.status != "connected":
         return {"skipped": True}
+    run = SyncRun(source_id=source.id)
+    db.add(run)
+    _commit(db)
     session = _session_for(source.connection)
     try:
         if source.kind.startswith("drive_"):
-            run = sync_drive(db, source, DriveClient(session))
+            sync_drive(db, source, DriveClient(session), run)
         elif source.kind == "gmail_query":
-            run = sync_gmail(db, source, GmailClient(session))
+            sync_gmail(db, source, GmailClient(session), run)
         else:
             return {"skipped": True}
     except GoogleError as exc:
         db.rollback()
-        source = db.get(ConnectionSource, source_id)
+        source, run = db.get(ConnectionSource, source_id), db.get(SyncRun, run.id)
         _record_failure(db, source, exc)
-        db.add(SyncRun(source_id=source.id, status="failed", finished_at=now(), note=str(exc)))
+        run.status, run.finished_at, run.note = "failed", now(), ((run.note or "") + " " + str(exc)).strip()
         db.commit()
         if exc.reconnect:
             raise jobs.PermanentJobError(str(exc)) from None
         raise
     finally:
         session.close()
+    run.status = "partial" if run.failed else "ok"
     run.finished_at = now()
     source.last_sync_at = now()
-    if run.status in {"ok", "partial"}:
-        source.last_success_at = now()
-        source.connection.last_success_at = now()
-        source.last_error = None if run.status == "ok" else f"{run.failed} item(s) failed and are queued for retry."
+    source.last_success_at = now()
+    source.connection.last_success_at = now()
+    source.last_error = None if run.status == "ok" else f"{run.failed} item(s) could not be stored; see the source inbox."
+    db.commit()
     return {"run": run.id, "seen": run.seen, "captured": run.captured, "duplicates": run.duplicates, "failed": run.failed}
 
 
@@ -302,17 +338,18 @@ def gmail_fetch_job(db: Session, payload: dict) -> dict:
     if failed is not None and failed.blob_id is None:
         db.delete(failed)
         db.flush()
+    source_id = db.scalar(select(ConnectionSource.id).where(ConnectionSource.connection_id == connection.id,
+                                                            ConnectionSource.kind == "gmail_query").limit(1))
+    run = SyncRun(source_id=source_id, note="Retry of one message")
+    db.add(run)
+    db.flush()
     session = _session_for(connection)
     try:
-        run = SyncRun(source_id=db.scalar(select(ConnectionSource.id).where(ConnectionSource.connection_id == connection.id,
-                                                                            ConnectionSource.kind == "gmail_query").limit(1)))
-        db.add(run)
-        db.flush()
-        capture_gmail_message(db, connection, GmailClient(session), payload["message_id"], run, payload.get("query", ""))
-        run.status, run.finished_at = ("ok" if not run.failed else "partial"), now()
+        fetched = capture_gmail_message(db, connection, GmailClient(session), payload["message_id"], run, payload.get("query", ""))
     finally:
         session.close()
-    if run.failed:
+    run.status, run.finished_at = ("ok" if fetched else "partial"), now()
+    if not fetched:
         raise RuntimeError("Message still could not be fetched; retrying later.")
     return {"captured": True}
 

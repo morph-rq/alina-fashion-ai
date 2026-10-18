@@ -24,6 +24,10 @@ if settings.database_url.startswith("sqlite"):
     def enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        # Readers never block the writer, and a short wait replaces "database is locked" while a job commits.
+        cursor.execute("PRAGMA busy_timeout=30000")
+        if ":memory:" not in settings.database_url and settings.database_url != "sqlite://":
+            cursor.execute("PRAGMA journal_mode=WAL")
         cursor.close()
 
 

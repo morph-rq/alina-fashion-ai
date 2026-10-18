@@ -21,6 +21,7 @@ from app.database import get_db
 from app.models import Connection, ConnectionSource, OutboxItem, SourceItem, SyncRun
 
 PENDING_REF = "oauth-pending"
+PICKER_ALLOWED = set(google_api.IDENTITY_SCOPES) | {google_api.SCOPE_DRIVE_FILE}
 CAPABILITIES = {
     "drive_files": [google_api.SCOPE_DRIVE_FILE],
     "drive_folder": [google_api.SCOPE_DRIVE_FILE, google_api.SCOPE_DRIVE_READONLY],
@@ -106,6 +107,8 @@ def install_connections(app, templates, context):
     @app.get("/connections/google/callback", dependencies=[Depends(require_admin)])
     def callback(request: Request, state: str = "", code: str = "", error: str = "", db: Session = Depends(get_db)):
         pending = secret_store.load(PENDING_REF)
+        if pending.get("purpose") == "picker":
+            return picker_callback(request, state, code, error, pending, db)
         cookie = request.cookies.get("fashion_oauth_state", "")
         valid = (state and cookie and secrets.compare_digest(cookie, state) and pending.get("expires", 0) > time.time()
                  and secrets.compare_digest(pending.get("state_hash", ""), hashlib.sha256(state.encode()).hexdigest()))
@@ -123,7 +126,10 @@ def install_connections(app, templates, context):
         missing = [scope for scope in pending["scopes"] if scope not in granted]
         existing = db.get(Connection, pending["connection_id"]) if pending.get("connection_id") else None
         if existing is not None and existing.account_email != result["email"]:
-            google_api.revoke(tokens.get("refresh_token") or tokens["access_token"], transport=_transport())
+            other = db.scalar(select(Connection).where(Connection.provider == "google", Connection.account_email == result["email"],
+                                                      Connection.status != "disconnected"))
+            if other is None:  # Revoking would also cancel an existing connection's grant for that account.
+                google_api.revoke(tokens.get("refresh_token") or tokens["access_token"], transport=_transport())
             return back(error=f"You signed in as {result['email']}, but this connection belongs to {existing.account_email}. Nothing was changed.")
         connection = existing or db.scalar(select(Connection).where(Connection.provider == "google", Connection.account_email == result["email"]))
         if connection is None:
@@ -181,21 +187,36 @@ def install_connections(app, templates, context):
         db.commit()
         return back(message="Sync queued; results appear below and in the source inbox.")
 
-    @app.get("/connections/{connection_id}/picker-token", dependencies=[Depends(require_admin)])
-    def picker_token(connection_id: int, request: Request, db: Session = Depends(get_db)):
-        if request.headers.get("sec-fetch-site") not in {None, "same-origin"}:
-            raise HTTPException(403, "Cross-site request refused.")
+    @app.post("/connections/{connection_id}/picker/start", dependencies=[Depends(require_admin)])
+    def picker_start(connection_id: int, db: Session = Depends(get_db)):
+        """Ask Google for a short-lived drive.file-only token for the Picker (no other scopes, no refresh token)."""
         connection = connection_or_404(db, connection_id)
-        if google_api.SCOPE_DRIVE_FILE not in connection.granted_scopes.split():
-            raise HTTPException(422, "Connect Drive (per-file) first.")
-        session = google_api.GoogleSession(connection.secret_ref, transport=_transport())
+        pending = google_api.authorization_request([google_api.SCOPE_DRIVE_FILE], login_hint=connection.account_email,
+                                                   offline=False, include_granted=False)
+        secret_store.save(PENDING_REF, {"state_hash": hashlib.sha256(pending.state.encode()).hexdigest(), "verifier": pending.verifier,
+                                        "expires": time.time() + 600, "connection_id": connection.id, "purpose": "picker"})
+        response = RedirectResponse(pending.url, 303)
+        response.set_cookie("fashion_oauth_state", pending.state, httponly=True, samesite="lax", max_age=600, path="/connections/google")
+        return response
+
+    def picker_callback(request, state, code, error, pending, db):
+        cookie = request.cookies.get("fashion_oauth_state", "")
+        valid = (state and cookie and secrets.compare_digest(cookie, state) and pending.get("expires", 0) > time.time()
+                 and secrets.compare_digest(pending.get("state_hash", ""), hashlib.sha256(state.encode()).hexdigest()))
+        secret_store.delete(PENDING_REF)
+        if not valid or error or not code:
+            return back(error="Picking files was cancelled or could not be verified.")
+        connection = connection_or_404(db, pending["connection_id"])
         try:
-            token = session._token()
+            result = google_api.exchange_code(code, pending["verifier"], transport=_transport())
         except google_api.GoogleError as exc:
-            raise HTTPException(409, str(exc)) from None
-        finally:
-            session.close()
-        return JSONResponse({"access_token": token}, headers={"Cache-Control": "no-store"})
+            return back(error=str(exc))
+        granted = set(result["tokens"].get("scope", "").split())
+        if result["email"] != connection.account_email:
+            return back(error=f"Pick files with {connection.account_email}; you signed in as {result['email']}.")
+        if not granted <= PICKER_ALLOWED:
+            return back(error="Google returned a token with more than per-file Drive access, so it was not given to the browser.")
+        return page(request, db, picker_connection=connection.id, picker_token=result["tokens"]["access_token"])
 
     @app.post("/connections/{connection_id}/sources", dependencies=[Depends(require_admin)])
     async def add_source(connection_id: int, request: Request, db: Session = Depends(get_db)):

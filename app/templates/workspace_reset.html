@@ -9,14 +9,14 @@
   {% for row in ready_imports %}<form class="wb-form" action="/imports/{{ row.batch.id }}/reverse-ready" method="post"><strong>{{ row.batch.filename }}</strong> → {{ row.ready.name if row.ready else '—' }}
     {% if row.blockers %}<ul>{% for blocker in row.blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>{% else %}<label>Reason<input name="reason" required minlength="12" maxlength="500"></label><button class="button">Reverse this Ready import</button>{% endif %}</form>
   {% else %}<p class="muted">No Ready-list imports.</p>{% endfor %}
-  <h2>3. Undo a master workbook import</h2><p>A master import creates seasons, orders and products that later work builds on, so it is not undone record by record. Restore a recovery snapshot taken before the import into a new folder and compare. See <a href="/storage">Storage &amp; backups</a>.</p></article>
+  <h2>3. Undo a master workbook import</h2><p>A master import creates seasons, orders and products that later work builds on, so it is not undone record by record. Restore a recovery snapshot taken before the import into a new folder and compare. See <a href="/recovery">Recovery</a>.</p></article>
   <article class="panel danger-zone"><p class="eyebrow">Danger zone</p><h2>4. Reset the whole workspace</h2>
   <p>This deletes <strong>every record in this workspace</strong>, not only imports. That includes manually entered products and customers, payments, Ready batches, shipments, groups and seller credit, intake drafts, and the <strong>audit history</strong>. Managed files are deleted as well.</p>
   <table class="data-table"><thead><tr><th>Category</th><th>Records</th></tr></thead><tbody>
   {% for category, tables in scope.tables.items() %}<tr><td>{{ category }}</td><td>{% for name, count in tables.items() %}{{ name }}: {{ count }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</td></tr>{% endfor %}
   {% for folder, facts in scope.directories.items() %}<tr><td>Files in {{ folder }}</td><td>{{ facts.files }} file(s), {{ (facts.bytes / 1024)|round|int }} KB</td></tr>{% endfor %}
   </tbody></table>
-  <p>Before anything is deleted, a verified recovery snapshot of all of the above is written to <code>backups/recovery</code>. If the snapshot fails, nothing is deleted. Files outside this project, such as originals in Downloads, are never touched. Connected accounts are not part of the reset.</p>
+  <p>Before anything is deleted, a verified recovery snapshot of all of the above is written to <code>backups/recovery</code>. If the snapshot fails, nothing is deleted. Files outside this project, such as originals in Downloads, are never touched. Connected Google accounts and their selected sources are kept (their sync starts again from scratch); disconnect them on the Connections page if needed.</p>
   <form action="/workspace/reset" method="post" onsubmit="return confirm('Delete every record and managed file in this workspace after writing a recovery snapshot?');"><label>Type <strong>{{ phrase }}</strong> to confirm<input name="confirmation" autocomplete="off" required></label><button class="button danger" type="submit">Snapshot, then reset everything</button></form></article>
 </section>
 {% endblock %}

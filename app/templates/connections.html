@@ -57,8 +57,8 @@ Background queue: {% for kind, states in queue.items() %}{{ kind }} {% for name,
 {% if scopes.SCOPE_DRIVE_READONLY in connection.granted_scopes %}<form action="/connections/{{ connection.id }}/sources" method="post" class="stack-form"><input type="hidden" name="kind" value="drive_folder">
 <label>Drive folder link or id<input name="folder" required></label><label>Name<input name="name" placeholder="Supplier orders"></label><button class="button">Watch folder</button></form>{% endif %}
 {% if scopes.SCOPE_DRIVE_FILE in connection.granted_scopes %}
-{% if picker_ready %}<form action="/connections/{{ connection.id }}/sources" method="post" id="picker-form-{{ connection.id }}"><input type="hidden" name="kind" value="drive_file"><input type="hidden" name="files" value="[]">
-<button class="button" type="button" data-picker="{{ connection.id }}">Pick Drive files…</button></form>{% else %}<p class="muted">To pick individual Drive files, set FASHION_GOOGLE_API_KEY and FASHION_GOOGLE_APP_ID (see the setup guide).</p>{% endif %}
+{% if picker_ready %}<form action="/connections/{{ connection.id }}/sources" method="post" id="picker-form-{{ connection.id }}"><input type="hidden" name="kind" value="drive_file"><input type="hidden" name="files" value="[]"></form>
+<form action="/connections/{{ connection.id }}/picker/start" method="post"><button class="button">Pick Drive files…</button><small class="muted"> Google asks for per-file access only; that short-lived token is the only one ever given to this page.</small></form>{% else %}<p class="muted">To pick individual Drive files, set FASHION_GOOGLE_API_KEY and FASHION_GOOGLE_APP_ID (see the setup guide).</p>{% endif %}
 <form action="/connections/{{ connection.id }}/sources" method="post"><input type="hidden" name="kind" value="drive_outputs"><button class="button">Add exports folder</button></form>
 <form action="/connections/{{ connection.id }}/sources" method="post"><input type="hidden" name="kind" value="drive_recovery"><button class="button">Add recovery archive folder</button></form>
 <form action="/connections/{{ connection.id }}/publish-exports" method="post"><button class="button">Upload current season workbooks</button></form>{% endif %}
@@ -72,26 +72,24 @@ Background queue: {% for kind, states in queue.items() %}{{ kind }} {% for name,
 {% if picker_ready %}
 <script src="https://apis.google.com/js/api.js"></script>
 <script>
-document.querySelectorAll('[data-picker]').forEach(function (button) {
-  button.addEventListener('click', function () {
-    var id = button.dataset.picker;
-    fetch('/connections/' + id + '/picker-token', { headers: { Accept: 'application/json' } }).then(function (r) { return r.json(); }).then(function (body) {
-      gapi.load('picker', function () {
-        var picker = new google.picker.PickerBuilder()
-          .addView(new google.picker.DocsView().setIncludeFolders(true).setSelectFolderEnabled(false))
-          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-          .setOAuthToken(body.access_token).setDeveloperKey({{ api_key|tojson }}).setAppId({{ app_id|tojson }})
-          .setCallback(function (data) {
-            if (data.action !== google.picker.Action.PICKED) return;
-            var form = document.getElementById('picker-form-' + id);
-            form.files.value = JSON.stringify(data.docs.map(function (doc) { return { id: doc.id, name: doc.name }; }));
-            form.submit();
-          }).build();
-        picker.setVisible(true);
-      });
-    });
+(function () {
+  var connection = {{ (picker_connection if picker_connection is defined else none)|tojson }};
+  var token = {{ (picker_token if picker_token is defined else none)|tojson }};
+  if (!connection || !token) return;
+  gapi.load('picker', function () {
+    var picker = new google.picker.PickerBuilder()
+      .addView(new google.picker.DocsView().setIncludeFolders(true).setSelectFolderEnabled(false))
+      .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+      .setOAuthToken(token).setDeveloperKey({{ api_key|tojson }}).setAppId({{ app_id|tojson }})
+      .setCallback(function (data) {
+        if (data.action !== google.picker.Action.PICKED) return;
+        var form = document.getElementById('picker-form-' + connection);
+        form.files.value = JSON.stringify(data.docs.map(function (doc) { return { id: doc.id, name: doc.name }; }));
+        form.submit();
+      }).build();
+    picker.setVisible(true);
   });
-});
+})();
 </script>
 {% endif %}
 {% endblock %}

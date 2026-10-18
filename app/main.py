@@ -110,6 +110,18 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 
+def _allowed_hosts() -> list[str]:
+    from urllib.parse import urlparse
+    hosts = {"127.0.0.1", "localhost", "[::1]", "testserver", urlparse(settings.public_base_url).hostname or ""}
+    hosts |= {host.strip() for host in settings.allowed_hosts.split(",") if host.strip()}
+    return sorted(host for host in hosts if host)
+
+
+# Refuse requests addressed to other host names (protects loopback-only routes from DNS rebinding).
+from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts())
+
+
 @app.middleware("http")
 async def protect_hosted_app(request: Request, call_next):
     """Require HTTP Basic credentials only when deployment credentials are set."""

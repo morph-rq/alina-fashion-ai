@@ -15,6 +15,7 @@ and its completion record.
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -35,6 +36,8 @@ PERIODIC: list[Callable[[Session], None]] = []
 WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{secrets.token_hex(3)}"
 LEASE_SECONDS = 300
 MAX_BACKOFF_SECONDS = 3600
+HEARTBEAT_SECONDS = 30
+_current_job: ContextVar[dict | None] = ContextVar("current_job", default=None)
 
 
 class PermanentJobError(Exception):
@@ -112,12 +115,34 @@ def _safe_error(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}"[:500]
 
 
+def heartbeat() -> None:
+    """Extend the running job's lease (and the worker lease) during long work.
+
+    Call only right after the handler has committed, so no write lock is held.
+    """
+    context = _current_job.get()
+    if context is None or (now() - context["last"]).total_seconds() < HEARTBEAT_SECONDS:
+        return
+    with context["factory"]() as db:
+        job = db.get(Job, context["job_id"])
+        if job is not None and job.claimed_by == context["worker"]:
+            job.lease_until = now() + timedelta(seconds=LEASE_SECONDS)
+        lease = db.get(WorkerLease, "background")
+        if lease is not None and lease.owner == context["worker"]:
+            lease.lease_until = now() + timedelta(seconds=90)
+        db.commit()
+    context["last"] = now()
+
+
 def run_job(session_factory: sessionmaker, job_id: int, worker_id: str = WORKER_ID) -> str:
     with session_factory() as db:
         job = db.get(Job, job_id)
+        if job is None:
+            return "missing"
         kind, payload = job.kind, json.loads(job.payload_json or "{}")
     function = HANDLERS.get(kind)
     outcome, result, error, permanent = "done", None, None, False
+    token = _current_job.set({"factory": session_factory, "job_id": job_id, "worker": worker_id, "last": now()})
     try:
         if function is None:
             raise PermanentJobError(f"No handler for job kind {kind}")
@@ -129,8 +154,12 @@ def run_job(session_factory: sessionmaker, job_id: int, worker_id: str = WORKER_
     except Exception as exc:  # noqa: BLE001 - every failure must be recorded, not lost.
         outcome, error = "failed", _safe_error(exc)
         log.warning("Job %s (%s) failed: %s", job_id, kind, error)
+    finally:
+        _current_job.reset(token)
     with session_factory() as db:
         job = db.get(Job, job_id)
+        if job is None:
+            return "missing"  # Removed meanwhile (for example by a workspace reset).
         if job.claimed_by != worker_id:
             return "lost-lease"  # Another worker reclaimed it after our lease expired.
         job.claimed_by, job.lease_until = None, None
@@ -152,6 +181,8 @@ def run_pending(session_factory: sessionmaker, *, limit: int = 100, kinds: set[s
     """Run due jobs until none remain (used by the worker loop and by tests)."""
     count = 0
     while count < limit:
+        if kinds is None and count and not acquire_worker_lease(session_factory, owner=worker_id):
+            break  # Another process took over the queue.
         job_id = claim(session_factory, worker_id, kinds)
         if job_id is None:
             break
@@ -200,9 +231,12 @@ async def worker_loop(session_factory: sessionmaker, poll_seconds: float = 5.0) 
     """Background loop for the app process. Only the lease holder does work."""
     try:
         while True:
-            if await asyncio.to_thread(acquire_worker_lease, session_factory):
-                await asyncio.to_thread(run_schedulers, session_factory)
-                await asyncio.to_thread(run_pending, session_factory)
+            try:
+                if await asyncio.to_thread(acquire_worker_lease, session_factory):
+                    await asyncio.to_thread(run_schedulers, session_factory)
+                    await asyncio.to_thread(run_pending, session_factory)
+            except Exception as exc:  # noqa: BLE001 - the loop must survive any single failure
+                log.warning("Background loop error: %s", _safe_error(exc))
             await asyncio.sleep(poll_seconds)
     finally:
         await asyncio.to_thread(release_worker_lease, session_factory)

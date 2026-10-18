@@ -717,6 +717,8 @@ def row_issues(db: Session, session: IntakeSession, row: DraftRow) -> list[Issue
              [{"value": option["value"], "label": f"{option['value']} ({option.get('origin', '')})"} for option in price_entry.get("candidates", [])], "conflict")
     elif state_of(row, "price", data) not in RESOLVED_STATES:
         need("price", price_entry.get("problem") or "What is the price?")
+    if value_of(row, "price", data) is not None and Decimal(value_of(row, "price", data)) <= 0 and value_of(row, "price_meaning", data) == "final":
+        need("price", "A final customer price must be above zero.", kind="invalid")
     if state_of(row, "price_meaning", data) not in RESOLVED_STATES and value_of(row, "price", data):
         need("price_meaning", f"Is {value_of(row, 'price', data)} the wholesale (factory) price or the final customer price?",
              [{"value": "wholesale", "label": "Wholesale / factory"}, {"value": "final", "label": "Final customer price"}])
@@ -918,6 +920,7 @@ def commit_session(db: Session, session: IntakeSession, *, operation_key: str, e
     results = []
     try:
         new_orders: dict[str, Order] = {}
+        new_customers: dict[str, Customer] = {}
         for plan in plans:
             order = plan.order
             if order is None:
@@ -926,9 +929,13 @@ def commit_session(db: Session, session: IntakeSession, *, operation_key: str, e
                 new_orders[key] = order
             customer = plan.customer
             if customer is None:
+                # Several rows for the same new customer create one customer, not MI and MI2.
+                customer = new_customers.get(_norm(plan.new_customer_name))
+            if customer is None:
                 customer = Customer(code=new_customer_code(db, plan.new_customer_name), name=plan.new_customer_name)
                 db.add(customer)
                 db.flush()
+                new_customers[_norm(plan.new_customer_name)] = customer
                 record_change(db, entity_type="Customer", entity_id=customer.id, field=None, previous_value=None, new_value=customer.code,
                               source_user=actor, description=f"Created customer {customer.code} ({customer.name}) from intake")
                 affected.add(customer.id)

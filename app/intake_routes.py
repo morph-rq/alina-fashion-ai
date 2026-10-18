@@ -336,8 +336,11 @@ def install_intake(app, templates, context):
             raise HTTPException(410, f"Stored evidence is unavailable: {exc}") from None
         inline = source.media_type in INLINE_TYPES
         media_type = source.media_type if inline else ("text/plain; charset=utf-8" if source.media_type.startswith("text/") else "application/octet-stream")
-        safe_name = "".join(ch if ch.isalnum() or ch in "._- " else "_" for ch in (source.original_name or f"source-{source.id}"))[:150]
+        from urllib.parse import quote
+        original = (source.original_name or f"source-{source.id}")[:150]
+        ascii_name = "".join(ch if ch.isascii() and (ch.isalnum() or ch in "._- ") else "_" for ch in original) or f"source-{source.id}"
+        disposition = "inline" if inline or media_type.startswith("text/") else "attachment"
         return Response(content, media_type=media_type, headers={
-            "Content-Disposition": f'{"inline" if inline or media_type.startswith("text/") else "attachment"}; filename="{safe_name}"',
+            "Content-Disposition": f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(original, safe='')}",
             "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self'",
             "Cache-Control": "private, no-store"})

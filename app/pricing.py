@@ -82,6 +82,9 @@ def parse_amount_text(text: str | None) -> AmountReading:
         mark = "," if "," in number else "."
         head, _, tail = number.rpartition(mark)
         if number.count(mark) > 1:
+            groups = number.split(mark)
+            if not all(len(group) == 3 for group in groups[1:]) or len(groups[0]) > 3:
+                return AmountReading(None, currency, f"Could not read {raw!r}: the separators do not form thousands groups.")
             number = number.replace(mark, "")  # 1.200.000 -> thousands only
         elif len(tail) == 3:
             return AmountReading(None, currency, f"{raw!r} could mean {head}{tail} or {head}.{tail}; state the amount without a thousands separator.")

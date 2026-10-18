@@ -91,7 +91,8 @@ class PendingAuth:
     verifier: str
 
 
-def authorization_request(scopes: list[str], login_hint: str | None = None) -> PendingAuth:
+def authorization_request(scopes: list[str], login_hint: str | None = None, *, offline: bool = True,
+                          include_granted: bool = True) -> PendingAuth:
     config = client_config()
     if not config.get("client_id"):
         raise GoogleError("Configure the Google OAuth client first (see the setup guide).")
@@ -99,8 +100,12 @@ def authorization_request(scopes: list[str], login_hint: str | None = None) -> P
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
     params = {"client_id": config["client_id"], "redirect_uri": redirect_uri(), "response_type": "code",
-              "scope": " ".join(dict.fromkeys(IDENTITY_SCOPES + scopes)), "access_type": "offline", "prompt": "consent",
-              "include_granted_scopes": "true", "state": state, "code_challenge": challenge, "code_challenge_method": "S256"}
+              "scope": " ".join(dict.fromkeys(IDENTITY_SCOPES + scopes)), "state": state,
+              "code_challenge": challenge, "code_challenge_method": "S256"}
+    if offline:
+        params.update(access_type="offline", prompt="consent")
+    if include_granted:
+        params["include_granted_scopes"] = "true"
     if login_hint:
         params["login_hint"] = login_hint
     return PendingAuth(url=AUTH_URL + "?" + urlencode(params), state=state, verifier=verifier)
@@ -190,7 +195,14 @@ class GoogleSession:
         secret_store.save(self.secret_ref, stored)
         return stored["access_token"]
 
+    def _drop_access_token(self) -> None:
+        stored = secret_store.load(self.secret_ref)
+        stored.pop("access_token", None)
+        stored["expires_at"] = 0
+        secret_store.save(self.secret_ref, stored)
+
     def request(self, method: str, url: str, action: str, *, attempts: int = 4, **kwargs) -> httpx.Response:
+        refreshed = False
         for attempt in range(attempts):
             headers = dict(kwargs.pop("headers", {}) or {})
             headers["Authorization"] = f"Bearer {self._token()}"
@@ -200,6 +212,12 @@ class GoogleSession:
                 if attempt == attempts - 1:
                     raise GoogleError(f"{action}: network unavailable.", retryable=True) from None
                 self.sleep(min(2 ** attempt, 20))
+                kwargs["headers"] = headers
+                continue
+            if response.status_code == 401 and not refreshed:
+                # The cached access token was rejected early (clock skew, revocation of that token only): refresh once.
+                refreshed = True
+                self._drop_access_token()
                 kwargs["headers"] = headers
                 continue
             try:
@@ -308,8 +326,11 @@ class DriveClient:
             while offset < size:
                 chunk = stream.read(8 * 1024 * 1024)
                 end = offset + len(chunk) - 1
-                response = self.s.client.put(location, headers={"Content-Type": media_type, "Content-Range": f"bytes {offset}-{end}/{size}"},
-                                             content=chunk)
+                try:
+                    response = self.s.client.put(location, headers={"Content-Type": media_type, "Content-Range": f"bytes {offset}-{end}/{size}"},
+                                                 content=chunk)
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    raise GoogleError("Uploading to Drive: network interrupted; the upload will be retried.", retryable=True) from None
                 if response.status_code == 308:
                     offset += len(chunk)
                     continue
@@ -344,7 +365,7 @@ class GmailClient:
                 return
 
     def history_page(self, start_history_id: str, page_token: str | None = None) -> dict:
-        params: dict[str, Any] = {"startHistoryId": start_history_id, "historyTypes": "messageAdded", "maxResults": 500}
+        params: dict[str, Any] = {"startHistoryId": start_history_id, "historyTypes": ["messageAdded", "labelAdded"], "maxResults": 500}
         if page_token:
             params["pageToken"] = page_token
         return self.s.request("GET", f"{GMAIL}/history", "Reading Gmail history", params=params).json()

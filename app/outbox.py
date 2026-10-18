@@ -76,41 +76,55 @@ def _resolve(item: OutboxItem) -> Path:
     return path if path.is_absolute() else ROOT_DIR / path
 
 
+def _fail(db: Session, item_id: int, state: str, message: str, *, reconnect: bool = False) -> None:
+    """Record an upload failure durably (the job's own transaction is rolled back on error)."""
+    db.rollback()
+    item = db.get(OutboxItem, item_id)
+    item.state, item.last_error = state, message
+    if reconnect:
+        connection = db.get(ConnectionSource, item.destination_id).connection
+        connection.status, connection.status_reason = "needs_reconnect", message
+    db.commit()
+
+
 @jobs.handler("outbox.upload")
 def upload_job(db: Session, payload: dict) -> dict:
     item = db.get(OutboxItem, payload["outbox_id"])
     if item is None or item.state == "verified":
         return {"skipped": True}
+    item_id = item.id
     destination = db.get(ConnectionSource, item.destination_id)
     connection = destination.connection
     if connection.status != "connected":
-        item.state, item.last_error = "queued", f"Waiting: connection is {connection.status}."
-        raise RuntimeError(item.last_error)
+        _fail(db, item_id, "queued", f"Waiting: connection is {connection.status.replace('_', ' ')}.")
+        raise RuntimeError("Destination connection is not available.")
     path = _resolve(item)
     if not path.is_file() or recovery.file_sha256(path) != item.content_sha256:
-        item.state, item.last_error = "failed", "The local file is missing or changed; regenerate it."
-        raise jobs.PermanentJobError(item.last_error)
+        _fail(db, item_id, "failed", "The local file is missing or changed; regenerate it.")
+        raise jobs.PermanentJobError("Local outbox file missing or changed.")
     from app import sync
     session = GoogleSession(connection.secret_ref, transport=sync.TRANSPORT)
     item.attempts += 1
+    item.state = "uploading"
+    db.commit()
     try:
         drive = DriveClient(session)
         folder = drive.ensure_folder(destination.name, destination.remote_id)
         destination.remote_id = folder
+        db.commit()  # Keep the folder even if the upload below fails, so a retry does not create another.
         remote = drive.find_by_hash(folder, item.content_sha256)
         if remote is None:
-            item.state = "uploading"
             remote = drive.upload(folder, item.filename, path, XLSX if item.kind == "export" else "application/octet-stream", item.content_sha256)
         elif remote.get("md5Checksum") != hashlib.md5(path.read_bytes()).hexdigest():
             raise GoogleError("A remote file with this hash exists but its checksum differs; not counted.")
     except GoogleError as exc:
-        item.state, item.last_error = "failed" if not exc.retryable else "queued", str(exc)
+        _fail(db, item_id, "queued" if exc.retryable else "failed", str(exc), reconnect=exc.reconnect)
         if exc.reconnect:
-            connection.status, connection.status_reason = "needs_reconnect", str(exc)
             raise jobs.PermanentJobError(str(exc)) from None
         raise
     finally:
         session.close()
+    item = db.get(OutboxItem, item_id)
     item.state, item.remote_id, item.verified_at, item.last_error = "verified", remote["id"], now(), None
     if item.kind == "recovery":
         state = secret_store.load(STATE_REF)
@@ -133,15 +147,20 @@ def recovery_key(create: bool = False) -> bytes | None:
 
 
 def data_fingerprint(db: Session) -> str:
-    """Changes when business records or captured evidence change (used to skip identical backups)."""
-    from app.models import Job
-    parts = [db.scalar(select(func.max(AuditLog.id))), db.scalar(select(func.count()).select_from(AuditLog)),
-             db.scalar(select(func.max(SourceItem.id))), db.scalar(select(func.max(SourceItem.updated_at)))]
+    """Hash of every business row and of managed files (used to skip identical backups).
+
+    Content is hashed rather than counted, so in-place edits (draft fields, corrections without an audit
+    row) are noticed. The database is small enough for this to be cheap.
+    """
     from app.database import Base
+    digest = hashlib.sha256()
     for table in Base.metadata.sorted_tables:
         if table.name in {"jobs", "worker_leases", "sync_runs", "outbox_items"}:
             continue
-        parts.append(db.scalar(select(func.count()).select_from(table)))
+        digest.update(table.name.encode())
+        for row in db.execute(select(table).order_by(*table.primary_key.columns)).all():
+            digest.update(repr(tuple(row)).encode())
+    parts = [digest.hexdigest()]
     for folder in recovery.INCLUDED_FOLDERS:
         base = recovery.ROOT_DIR / folder
         files = [path for path in base.rglob("*") if path.is_file()] if base.is_dir() else []

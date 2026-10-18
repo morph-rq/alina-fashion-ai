@@ -35,6 +35,8 @@ class FakeGoogle:
         self.history_id = 100
         self.requests: list[str] = []
         self.offline = False
+        self.labels: dict[str, set[str]] = {}
+        self.fail_put_once = False
 
     # --- test helpers --------------------------------------------------------------
     def add_file(self, file_id, name, mime, content=b"", parents=("folder-1",), version="1"):
@@ -48,11 +50,17 @@ class FakeGoogle:
         self.files[file_id]["trashed"] = True
         self.changes.append({"fileId": file_id, "removed": True})
 
-    def add_message(self, message_id, raw: bytes):
+    def add_message(self, message_id, raw: bytes, labels=("alina-orders",)):
         self.messages[message_id] = raw
         self.message_order.append(message_id)
+        self.labels[message_id] = set(labels)
         self.history_id += 1
         self.history.append({"id": str(self.history_id), "messagesAdded": [{"message": {"id": message_id}}]})
+
+    def add_label(self, message_id, label):
+        self.labels[message_id].add(label)
+        self.history_id += 1
+        self.history.append({"id": str(self.history_id), "labelsAdded": [{"message": {"id": message_id}, "labelIds": [label]}]})
 
     def transport(self):
         return httpx.MockTransport(self.handle)
@@ -101,7 +109,8 @@ class FakeGoogle:
             query = params.get("q", "")
             if "appProperties" in query:
                 sha = query.split("value='")[1].split("'")[0]
-                found = [meta for meta in self.uploads.values() if meta["appProperties"]["sha256"] == sha]
+                folder = query.split("'")[1]
+                found = [meta for meta in self.uploads.values() if meta["appProperties"]["sha256"] == sha and folder in meta["parents"]]
                 return httpx.Response(200, json={"files": found})
             folder = query.split("'")[1]
             children = [meta for meta in self.files.values() if folder in meta["parents"] and not meta["trashed"]]
@@ -139,6 +148,12 @@ class FakeGoogle:
 
     def put_upload(self, request):
         content = request.content
+        if self.fail_put_once:
+            # The upload reaches Drive but the response is lost.
+            self.fail_put_once = False
+            self.uploads[f"upload-{len(self.uploads) + 1}"] = dict(self._pending, id=f"upload-{len(self.uploads) + 1}",
+                                                                    md5Checksum=hashlib.md5(content).hexdigest())
+            raise httpx.ReadTimeout("response lost", request=request)
         file_id = f"upload-{len(self.uploads) + 1}"
         meta = dict(self._pending, id=file_id, md5Checksum=hashlib.md5(content).hexdigest(), size=str(len(content)))
         self.uploads[file_id] = meta
@@ -149,7 +164,10 @@ class FakeGoogle:
         if path == "/profile":
             return httpx.Response(200, json={"emailAddress": self.email, "historyId": str(self.history_id)})
         if path == "/messages":
-            ids = list(reversed(self.message_order))
+            query = params.get("q", "")
+            wanted = [part.split(":", 1)[1] for part in query.split() if part.startswith("label:")]
+            ids = [message_id for message_id in reversed(self.message_order)
+                   if all(label in self.labels.get(message_id, set()) for label in wanted)]
             start = int(params.get("pageToken", 0))
             body = {"messages": [{"id": message_id, "threadId": f"t-{message_id}"} for message_id in ids[start:start + self.page_size]]}
             if start + self.page_size < len(ids):

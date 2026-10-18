@@ -125,3 +125,22 @@ def test_todo_uses_wholesale_factory_due_after_customers_pay(workspace_session):
     db.flush()
     factory_task = next(task for task in operations_inbox(db) if task.title.startswith('Factory payment'))
     assert '50.00' in factory_task.detail
+
+
+def test_fully_ready_goods_are_charged_exactly_their_value(workspace_session):
+    """Initial and Ready shares are complementary, so odd cents are never charged twice."""
+    db = workspace_session
+    item = db.scalar(select(OrderItem))
+    item.wholesale_unit_price = D('1050.73')  # customer value 1365.95: halves are not whole cents
+    batch = ReadyBatch(season_id=item.order.season_id, name='Ready 1')
+    db.add(batch)
+    db.flush()
+    item.ready_batch_id = batch.id
+    item.status = 'Ready'
+    db.flush()
+    statement = customer_statement(db, item.customer_id, 'AW26')
+    assert statement.ordered == D('1365.95')
+    assert statement.initial_prepayment + statement.ready_balance_due == statement.ordered
+    assert statement.merchandise_charge == statement.ordered
+    assert factory_initial_due(item.order) + factory_ready_due([item]) == D('1050.73')
+    assert dashboard_data(db, 'AW26').totals.current_merchandise_charge == statement.ordered

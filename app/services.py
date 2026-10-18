@@ -85,7 +85,11 @@ def load_season(session: Session, season_name: str | None = None) -> Season | No
 
 def order_summary(order: Order) -> OrderSummary:
     rule = order_rule(order)
-    return OrderSummary(order=order, amounts=calculate_order(order.items, rule.initial_prepayment_percentage, rule.ready_balance_percentage))
+    amounts = calculate_order(order.items, rule.initial_prepayment_percentage, rule.ready_balance_percentage)
+    # Ready charges use the same complement-of-initial rounding as customer statements.
+    amounts.ready_balance_due = money(sum((customer_ready_due(item) for item in order.items if item.ready_batch_id), ZERO))
+    amounts.current_merchandise_charge = money(amounts.required_prepayment + amounts.ready_balance_due)
+    return OrderSummary(order=order, amounts=amounts)
 
 
 # --- Payment-stage liabilities -------------------------------------------------
@@ -106,37 +110,70 @@ def _active(items):
     return [item for item in items if item.status != "Cancelled"]
 
 
-def client_initial_charges(order: Order) -> dict[int | None, Decimal]:
-    """Customer shares of the order's initial charge, reconciling to the cent."""
-    buckets: dict[Decimal, dict[int | None, Decimal]] = {}
+def _row_key(item: OrderItem) -> int:
+    # Unsaved rows have no id yet; give them a stable negative key for this call.
+    return item.id if item.id is not None else -id(item)
+
+
+def item_initial_shares(order: Order, basis: str = "final") -> dict[int, Decimal]:
+    """Each active row's share of the order's initial charge.
+
+    Per payment-rate bucket the total is rounded once, then split across rows with
+    the largest-remainder method, so shares add up to the cent. ``basis`` is
+    ``"final"`` for customer charges and ``"base"`` for factory (wholesale) liability.
+    """
+    buckets: dict[Decimal, dict[int, Decimal]] = {}
     for item in _active(order.items):
-        weights = buckets.setdefault(item_rates(item)[0], {})
-        weights[item.customer_id] = weights.get(item.customer_id, ZERO) + item_amounts(item).final
-    shares: dict[int | None, Decimal] = {}
+        amounts = item_amounts(item)
+        weight = amounts.final if basis == "final" else amounts.base
+        buckets.setdefault(item_rates(item)[0], {})[_row_key(item)] = max(weight, ZERO)
+    shares: dict[int, Decimal] = {}
     for rate, weights in buckets.items():
-        if sum(weights.values(), ZERO) <= ZERO:
+        total = sum(weights.values(), ZERO)
+        if total <= ZERO:
+            shares.update({item_id: ZERO for item_id in weights})
             continue
-        for customer_id, value in allocate_money(money(sum(weights.values(), ZERO) * rate), weights).items():
-            shares[customer_id] = money(shares.get(customer_id, ZERO) + value)
+        shares.update(allocate_money(money(total * rate), weights))
     return shares
 
 
-def customer_ready_due(item: OrderItem) -> Decimal:
+def client_initial_charges(order: Order) -> dict[int | None, Decimal]:
+    """Customer shares of the order's initial charge, reconciling to the cent."""
+    by_customer: dict[int | None, Decimal] = {}
+    shares = item_initial_shares(order)
+    for item in _active(order.items):
+        by_customer[item.customer_id] = money(by_customer.get(item.customer_id, ZERO) + shares[_row_key(item)])
+    return by_customer
+
+
+def _ready_share(item: OrderItem, basis: str) -> Decimal:
+    """The Ready-stage share of a row.
+
+    When the initial and Ready rates add up to 100%, the Ready share is the row
+    value minus its initial share, so a fully Ready row is charged exactly its
+    value. Otherwise (an invalid rule that System Check reports) the Ready rate
+    is applied directly.
+    """
     if item.status == "Cancelled":
         return ZERO
-    return money(item_amounts(item).final * item_rates(item)[1])
+    amounts = item_amounts(item)
+    value = amounts.final if basis == "final" else amounts.base
+    initial_rate, ready_rate = item_rates(item)
+    if money(initial_rate + ready_rate) == Decimal("1.00"):
+        return money(value - item_initial_shares(item.order, basis).get(_row_key(item), ZERO))
+    return money(value * ready_rate)
+
+
+def customer_ready_due(item: OrderItem) -> Decimal:
+    return _ready_share(item, "final")
 
 
 def factory_initial_due(order: Order) -> Decimal:
-    buckets: dict[Decimal, Decimal] = {}
-    for item in _active(order.items):
-        rate = item_rates(item)[0]
-        buckets[rate] = buckets.get(rate, ZERO) + item_amounts(item).base
-    return money(sum((money(value * rate) for rate, value in buckets.items()), ZERO))
+    return money(sum(item_initial_shares(order, "base").values(), ZERO))
 
 
 def factory_ready_due(items) -> Decimal:
-    return money(sum((money(item_amounts(item).base * item_rates(item)[1]) for item in _active(items)), ZERO))
+    return money(sum((_ready_share(item, "base") for item in _active(items)), ZERO))
 
 
 def item_transport_fee(item: OrderItem, shipment: Shipment) -> Decimal:

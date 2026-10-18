@@ -37,10 +37,9 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_api_key: str = ""   # Browser key for the Google Picker (restricted to this origin in Google Cloud).
     google_app_id: str = ""    # Google Cloud project number, required by the Picker.
-    # Recovery: local snapshot interval and how many verified snapshots to keep locally and remotely.
+    # Recovery: snapshot interval and how many verified local snapshots to keep (remote archives are never auto-deleted).
     recovery_interval_hours: int = 6
     recovery_keep_local: int = 30
-    recovery_keep_remote_days: int = 90
     model_config = SettingsConfigDict(env_prefix="FASHION_", env_file=".env")
 
     @property

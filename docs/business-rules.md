@@ -33,17 +33,35 @@ Cancelled items do not contribute to financial totals.
 ## Staged customer and factory liability
 
 ```text
-initial_due = active_order_value × initial_prepayment_percentage
-ready_balance_due = value of goods assigned to a Ready batch × ready_balance_percentage
-current_merchandise_charge = initial_due + ready_balance_due
+order_initial_due   = round(active_order_value × initial rate)            (once per rate bucket)
+row_initial_share   = largest-remainder share of order_initial_due by row value (cents add up exactly)
+row_ready_share     = row_value − row_initial_share                        (when initial + Ready rates = 100%)
+customer initial    = Σ row_initial_share of the customer's rows
+customer Ready due  = Σ row_ready_share of the customer's rows in a Ready batch
+current_merchandise_charge = initial + Ready due
 total_charged = current_merchandise_charge + allocated shipment fees + explicit expenses
-outstanding = max(total_charged - payments, 0)
-overpayment = max(payments - total_charged, 0)
+net payments  = Σ payments − Σ refunds
+outstanding = max(total_charged − net payments, 0)
+overpayment = max(net payments − total_charged, 0)
+
+factory initial due = same allocation on the wholesale base (no markup)
+factory Ready due   = Σ (row wholesale base − row factory initial share) for Ready rows
 ```
+
+Shares are computed in `app/services.py` (`item_initial_shares`, `client_initial_charges`, `customer_ready_due`,
+`factory_initial_due`, `factory_ready_due`). Statements, the dashboard, System Check, To-do, the Ready page and
+Excel use these functions, so customer shares always reconcile to the order total and a fully Ready row is
+charged exactly its value (previously the two halves were rounded separately and could exceed the value by a
+cent). A purchase group's initial/shipment percentages override the brand rule for its rows. Factory
+liability is always on the wholesale base: a selling-price override changes the customer charge, not the
+factory debt.
+
+Refunds are stored as positive amounts with type `refund`; every output shows them labelled "Refund" with a
+negative sign (`calculations.signed_payment_amount`), and listed payment rows add up to the net figure.
 
 The remaining percentage is never charged merely because goods exist in the order. It becomes due only when those goods enter a Ready batch. Customer payments may be allocated to `initial` or `ready`; a Ready allocation names its batch. Factory payments independently record the initial combined-order transfer or a Ready-batch transfer.
 
-Expected receipt is available only after every affected customer has satisfied their own Ready liability for the batch. One customer's overpayment cannot mask another customer's missing payment. Every affected customer then receives the last customer-completion date plus the configured number of days (14 by default).
+Expected receipt is available only after every affected customer has satisfied their own Ready liability for the batch **and** has no outstanding balance for the season (including fees). One customer's overpayment cannot mask another customer's missing payment. The estimate is the later of the Ready completion date and the last full-payment date, plus the configured number of days (14 by default). A later refund or new charge reopens the balance and withdraws the estimate. Estimates are rule-based, not carrier tracking.
 
 Negative saldo is never silently netted; it is a blocking validation error.
 
@@ -70,7 +88,7 @@ Ready, shipped, in-transit, arrived, delivered, or otherwise operationally advan
 
 ## Ready-list automation
 
-A supplier Ready list must identify products by article/SKU. Brand, customer/allocation, size, quantity, and a Ready flag are optional match constraints. A row is applied only when it resolves unambiguously to active master-order units. If a partial quantity becomes Ready, the remaining quantity is cloned as a separate source-fact record so accounting totals do not change.
+A supplier Ready list must identify products by article/SKU. Brand, customer/allocation, size, quantity, and a Ready flag are optional match constraints. A row is applied only when it resolves unambiguously to active master-order units. If a partial quantity becomes Ready, the remaining quantity is split into a separate row (`ready_importer.split_item`) that copies every descriptive, price, allocation and provenance field and collection membership, and records `split_from_item_id`. The remainder stays available to later rows of the same upload, so repeated partial rows for one SKU are neither lost nor sent to review. A Ready-list import can be reversed while no payment, factory payment or shipment depends on its batch.
 
 A Ready import creates one batch, changes matched units to Ready, recalculates customer and factory liabilities from those same records, and generates new statements only for affected customers. Missing, over-quantity, cross-customer, and ambiguous matches are not guessed; they enter Import Review.
 
@@ -95,3 +113,28 @@ Errors block a clean SYSTEM CHECK: ambiguous/unallocated product, customer/facto
 Warnings include missing price/size, intentional markup exception, source-total mismatch, unallocated historical payment stage, factory-payment mismatch, payment mismatch, broken formulas, and open review records.
 
 Financial discrepancies are reported, never automatically corrected.
+
+
+## Price meaning and reverse rounding
+
+A stated price must be identified as wholesale (factory) or final (customer), and per piece or for the line.
+For a final price the app searches the cent values around `final / (1 + markup)` for a wholesale unit price
+whose forward calculation gives exactly the stated final. If one exists it is used. If none exists (for
+example EUR 100.00 at 35%), the stated final is kept exactly as the row's selling price and the nearest
+wholesale is recorded as derived (`app/pricing.wholesale_from_final`). Line prices must divide into whole-cent
+unit prices. Amounts are read without guessing the decimal locale: `1.200,50` and `1,200.50` are clear;
+`1.200` or `1,200` is asked. Currencies other than EUR are not converted automatically.
+
+## Corrections of operational rows
+
+Rows that are Ready, in a shipment or past Ready status keep their quantity, price, markup and customer
+unless an explicit correction reason is entered in the product editor (the reason is stored in the audit
+log). Excel uploads and AI suggestions cannot change those fields on such rows. Every changed field is
+audited with its channel; product rows carry a revision number and stale edits are refused.
+
+## Startup data migrations
+
+Data migrations are versioned (`schema_migrations`) and run once. The historical allocation re-check never
+removes an existing customer assignment and skips rows with a resolved allocation note; it only allocates
+rows that are still unallocated with one unambiguous parsed customer, and opens notes for ambiguous ones.
+Run `scripts/migration_check.py <database>` against a copy before upgrading a workspace.

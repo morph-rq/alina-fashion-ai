@@ -63,6 +63,10 @@ FASHION_GOOGLE_CLIENT_SECRET=...
 
 Restart the app after changing `.env`. Never paste these values into chat or commit them.
 
+The app answers only to `127.0.0.1`, `localhost` and the host of `FASHION_PUBLIC_BASE_URL` (protection
+against DNS rebinding). Add other names, for example a tunnel host, with `FASHION_ALLOWED_HOSTS`, and only
+together with the app login.
+
 ## 3. Connect
 
 1. **Connections → Connect a Google account**: tick the capabilities, read the explanations, tick
@@ -74,7 +78,9 @@ Restart the app after changing `.env`. Never paste these values into chat or com
      The first sync lists matching mail from the start date; later syncs use Gmail history. Use
      *Backfill from date* to deliberately import older mail; already captured messages are skipped.
    * **Watch folder**: paste the folder link (needs the folder permission).
-   * **Pick Drive files…**: opens the Picker (needs the API key and project number).
+   * **Pick Drive files…**: asks Google for a separate, short-lived token limited to per-file Drive access
+     (no refresh token) and opens the Picker with it. The connection's own token, which may also read Gmail,
+     is never given to the browser. Needs the API key and project number.
    * **Exports folder / Recovery archive folder**: folders created by the app.
 4. **Sync now** or wait for the schedule (every 15 minutes by default, per source).
 
@@ -87,7 +93,12 @@ Restart the app after changing `.env`. Never paste these values into chat or com
 * E-mail: the original message is stored as `message/rfc822`; headers, a plain-text body and attachments are
   extracted locally. HTML is converted to text without loading links, images or tracking pixels.
   Unsupported attachments are recorded as *ignored* with the reason; undecodable ones as *failed*.
-* Checkpoints (Drive page token, Gmail history id) are saved together with the items observed. A failed
+* Gmail history is read for new messages *and* labels added later, so mail labelled by hand after it
+  arrived is still captured. A message too large to store (over 25 MB) is listed as failed with the reason
+  and does not block the rest.
+* Each item is committed on its own and no database write is open during downloads, so the app stays usable
+  during a large backfill.
+* Checkpoints (Drive page token, Gmail history id) are saved only after the items they cover are committed. A failed
   download is recorded as a failed inbox item with a retry job before the checkpoint moves on. If Gmail
   history has expired (HTTP 404), the app performs a bounded full resync from the start date and reports it.
 * Throttling (429/5xx) is retried with backoff; revoked or expired consent marks the connection

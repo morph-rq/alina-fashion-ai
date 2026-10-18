@@ -9,7 +9,7 @@ A clean FastAPI/SQLite workspace for fashion orders, customer records, collectio
 - Google Drive and Gmail: [docs/drive-gmail-setup.md](docs/drive-gmail-setup.md) (account setup pending).
 - Backups and restore: [docs/backup-restore.md](docs/backup-restore.md).
 - What changed, how it was checked, what remains: [docs/IMPLEMENTATION_PROGRESS.md](docs/IMPLEMENTATION_PROGRESS.md).
-- Run: `start-local.ps1` (127.0.0.1:8001). Tests: `..lina-fashion\.venv\Scripts\python.exe -m pytest -q`.
+- Run: `start-local.ps1` (127.0.0.1:8001). Tests: `..\alina-fashion\.venv\Scripts\python.exe -m pytest -q`.
 
 ## What is included
 

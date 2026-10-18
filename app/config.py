@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     searxng_url: str = "http://127.0.0.1:8888"
     # Durable background jobs (analysis, sync, backups). Disable only for tests or one-off scripts.
     background_worker: bool = True
+    # Address this app is opened at; the Google OAuth redirect URI is derived from it.
+    public_base_url: str = "http://127.0.0.1:8001"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_api_key: str = ""   # Browser key for the Google Picker (restricted to this origin in Google Cloud).
+    google_app_id: str = ""    # Google Cloud project number, required by the Picker.
+    # Recovery: local snapshot interval and how many verified snapshots to keep locally and remotely.
+    recovery_interval_hours: int = 6
+    recovery_keep_local: int = 30
+    recovery_keep_remote_days: int = 90
     model_config = SettingsConfigDict(env_prefix="FASHION_", env_file=".env")
 
     @property

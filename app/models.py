@@ -596,4 +596,79 @@ class WorkerLease(Base):
     lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+# --- External connections (Google Drive / Gmail) -----------------------------------
+
+class Connection(Base):
+    """An app-level account connection. Tokens are stored in the secret store, never here."""
+    __tablename__ = "connections"
+    __table_args__ = (UniqueConstraint("provider", "account_email", name="uq_connection_account"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(30), default="google")
+    account_email: Mapped[str] = mapped_column(String(320))
+    account_subject: Mapped[str | None] = mapped_column(String(100))  # Stable provider account id
+    granted_scopes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(30), default="connected")  # connected | paused | needs_reconnect | disconnected
+    status_reason: Mapped[str | None] = mapped_column(Text)
+    secret_ref: Mapped[str] = mapped_column(String(100))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    sources: Mapped[list[ConnectionSource]] = relationship(back_populates="connection", order_by="ConnectionSource.id")
+
+
+class ConnectionSource(Base):
+    """A deliberately selected input (Drive file/folder, Gmail query) or output destination."""
+    __tablename__ = "connection_sources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    connection_id: Mapped[int] = mapped_column(ForeignKey("connections.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(30))  # drive_file | drive_folder | gmail_query | drive_outputs | drive_recovery
+    remote_id: Mapped[str | None] = mapped_column(String(300))
+    name: Mapped[str] = mapped_column(String(300), default="")
+    query: Mapped[str | None] = mapped_column(Text)
+    start_date: Mapped[date | None] = mapped_column(Date)
+    checkpoint: Mapped[str | None] = mapped_column(Text)
+    checkpoint_kind: Mapped[str | None] = mapped_column(String(40))  # drive_changes | drive_listing | gmail_history | gmail_full
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    connection: Mapped[Connection] = relationship(back_populates="sources")
+
+
+class SyncRun(Base):
+    __tablename__ = "sync_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("connection_sources.id"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running | ok | partial | failed
+    seen: Mapped[int] = mapped_column(Integer, default=0)
+    captured: Mapped[int] = mapped_column(Integer, default=0)
+    duplicates: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+class OutboxItem(Base):
+    """Outgoing work to a remote destination (exports, recovery archives). Queued while offline."""
+    __tablename__ = "outbox_items"
+    __table_args__ = (UniqueConstraint("destination_id", "content_sha256", name="uq_outbox_content"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    destination_id: Mapped[int] = mapped_column(ForeignKey("connection_sources.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(30))  # export | recovery
+    filename: Mapped[str] = mapped_column(String(300))
+    local_path: Mapped[str] = mapped_column(String(1000))
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(20), default="queued")  # queued | uploading | uploaded | verified | failed
+    remote_id: Mapped[str | None] = mapped_column(String(300))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 ModelDict = dict[str, Any]

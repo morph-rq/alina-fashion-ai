@@ -16,7 +16,7 @@ from app.models import (Brand, Customer, Distributor, Order, OrderItem, Purchase
                         Season, SellerCreditAccount, SellerCreditEntry)
 from app.worksheet import (account_balance, get_account, group_amounts, split_cost,
                            transfer_credit, worksheet_data)
-from app import storage
+from app import google_api, recovery, secret_store
 
 
 @pytest.fixture
@@ -25,9 +25,6 @@ def ledger(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, 'app_password', '')
     engine = create_engine('sqlite:///'+str(tmp_path/'ledger.db'), connect_args={'check_same_thread':False})
     Base.metadata.create_all(engine)
-    monkeypatch.setattr(storage, 'PRIVATE', tmp_path/'private')
-    monkeypatch.setattr(storage, 'BACKUPS', tmp_path/'backups')
-    monkeypatch.setattr(storage, 'mark_dirty', lambda: None)
     with Session(engine, expire_on_commit=False) as db:
         season, brand, customer, distributor = Season(name='SS26'), Brand(name='Atelier'), Customer(code='AA'), Distributor(name='Distributor A')
         db.add_all([season,brand,customer,distributor]);db.flush()
@@ -154,30 +151,26 @@ def test_group_costs_reach_customer_statement_once(ledger):
     assert dashboard_data(db,'SS26').expenses_total==D('10')
 
 
-def test_verified_snapshot_contains_data_not_credentials(ledger,tmp_path,monkeypatch):
+def test_verified_snapshot_contains_data_not_credentials(ledger,tmp_path):
     db,*_=ledger
     root=tmp_path/'workspace';(root/'data'/'imports').mkdir(parents=True)
     (root/'data'/'private').mkdir()
     (root/'data'/'private'/'token.txt').write_text('secret')
     (root/'data'/'imports'/'source.txt').write_text('source document')
-    monkeypatch.setattr(storage,'ROOT_DIR',root)
-    monkeypatch.setattr(storage,'engine',db.get_bind())
-    path=storage.create_snapshot()
-    manifest=storage.verify_snapshot(path)
+    snapshot=recovery.create_snapshot(db,reason='test',root=root)
+    manifest=recovery.verify_snapshot(snapshot.path)
     assert 'data/fashion_orders.db' in manifest['files']
     assert 'data/imports/source.txt' in manifest['files']
     assert not any('private' in name for name in manifest['files'])
-    assert storage.read_state()['last_local_file']==path.name
+    assert manifest['table_counts']['order_items']==3
 
 
-def test_dpapi_round_trip_excludes_plaintext(tmp_path,monkeypatch):
-    import os
-    if os.name!='nt':pytest.skip('Windows DPAPI')
-    monkeypatch.setattr(storage,'PRIVATE',tmp_path)
+def test_secret_store_round_trip_excludes_plaintext(tmp_path,monkeypatch):
+    monkeypatch.setattr(secret_store,'PRIVATE',tmp_path)
     credentials={'client_id':'test-client','refresh_token':'private-secret'}
-    storage.save_credentials(credentials)
-    assert b'private-secret' not in (tmp_path/'google-drive.bin').read_bytes()
-    assert storage.load_credentials()==credentials
+    secret_store.save('google-test',credentials)
+    assert b'private-secret' not in (tmp_path/'secrets'/'google-test.bin').read_bytes()
+    assert secret_store.load('google-test')==credentials
 
 
 def test_cross_origin_write_is_rejected(ledger):
@@ -225,33 +218,39 @@ def test_concurrent_transfers_cannot_overdraw(ledger):
 
 @pytest.mark.parametrize('matches',[True,False])
 def test_drive_requires_matching_checksum_before_success(tmp_path,monkeypatch,matches):
+    import hashlib
     import httpx
-    path=tmp_path/'snapshot.zip';path.write_bytes(b'verified archive fixture')
-    monkeypatch.setattr(storage,'PRIVATE',tmp_path/'private')
-    creds={'client_id':'client','client_secret':'secret','refresh_token':'refresh','folder_id':'folder-1'}
-    monkeypatch.setattr(storage,'load_credentials',lambda:creds)
-    checksum=storage.file_hash(path,'md5')
+    path=tmp_path/'archive.afra';path.write_bytes(b'verified archive fixture')
+    monkeypatch.setattr(secret_store,'PRIVATE',tmp_path/'private')
+    monkeypatch.setattr(settings,'google_client_id','client.apps.googleusercontent.com')
+    monkeypatch.setattr(settings,'google_client_secret','secret')
+    secret_store.save('google-t',{'refresh_token':'refresh'})
+    checksum=hashlib.md5(path.read_bytes()).hexdigest()
     def handler(request):
         if request.url.host=='oauth2.googleapis.com':
-            return httpx.Response(200,json={'access_token':'access'})
-        if request.method=='GET':return httpx.Response(200,json={'files':[]})
+            return httpx.Response(200,json={'access_token':'access','expires_in':3600})
         if request.method=='POST':return httpx.Response(200,headers={'Location':'https://www.googleapis.com/upload/session'})
         if request.method=='PUT':return httpx.Response(200,json={'id':'remote-1','md5Checksum':checksum if matches else 'incorrect'})
         raise AssertionError(str(request.url))
-    client=httpx.Client(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(storage.httpx,'Client',lambda **kwargs:client)
+    session=google_api.GoogleSession('google-t',transport=httpx.MockTransport(handler),sleep=lambda _s:None)
+    drive=google_api.DriveClient(session)
     if matches:
-        storage.upload_snapshot(path)
-        assert storage.read_state()['last_drive_id']=='remote-1'
-        assert storage.read_state()['last_drive_file']==path.name
+        assert drive.upload('folder-1','archive.afra',path,'application/octet-stream','abc')['id']=='remote-1'
     else:
-        with pytest.raises(ValueError,match='checksum'):
-            storage.upload_snapshot(path)
-        assert not storage.read_state().get('last_drive_at')
+        with pytest.raises(google_api.GoogleError,match='checksum'):
+            drive.upload('folder-1','archive.afra',path,'application/octet-stream','abc')
 
 
 def test_invalid_google_callback_is_rejected(ledger):
-    assert TestClient(app).get('/storage/google/callback?state=forged&code=fake').status_code==400
+    db,*_=ledger
+    app.dependency_overrides[get_db]=lambda:(yield db)
+    try:
+        response=TestClient(app).get('/connections/google/callback?state=forged&code=fake',follow_redirects=False)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code==303 and 'could+not+be+verified' in response.headers['location']
+    from app.models import Connection
+    assert db.scalar(select(Connection))is None
 
 
 def test_custom_group_payment_percentages_reach_statements(ledger):

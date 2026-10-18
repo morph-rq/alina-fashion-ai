@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Recovery · {{ app_name }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<section class="page-head"><div><p class="eyebrow">Backups you can actually restore</p><h1>Recovery</h1>
+<p>Consistent snapshots of the database, source evidence, drafts, audit history and files, checked file by file. Off-site copies are encrypted with your recovery code before they leave this computer.</p></div>
+<form action="/recovery/backup" method="post"><button class="button primary">Back up now</button></form></section>
+{% if message %}<p class="notice">{{ message }}</p>{% endif %}{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+{% if new_code %}<section class="panel danger-zone"><h2>Your recovery code — shown once</h2>
+<p style="font-family:monospace;font-size:1.2rem;letter-spacing:.05em;overflow-wrap:anywhere">{{ new_code }}</p>
+<p>Write it on paper or store it in a password manager that is <strong>not</strong> this computer and <strong>not</strong> the Google account holding the backups. Without it, the encrypted archives cannot be opened on another computer. It is not shown again.</p>
+<form action="/recovery/key/acknowledge" method="post"><label>Type <strong>I HAVE STORED IT</strong><input name="confirmation" autocomplete="off" required></label><button class="button primary">Confirm</button></form></section>{% endif %}
+{% if status.unprotected %}<p class="notice error">{{ status.unprotected }} The next scheduled backup will include them, or use Back up now.</p>{% endif %}
+<section class="two-col top-align">
+<article class="panel"><h2>On this computer</h2><dl class="totals-list">
+<div><dt>Last verified snapshot</dt><dd>{{ status.last_local_at or 'none yet' }}</dd></div>
+<div><dt>File</dt><dd>{{ status.last_local_file or '—' }}</dd></div>
+<div><dt>Encrypted copy verified</dt><dd>{{ status.last_encrypted_at or 'not yet (needs a recovery code)' }}</dd></div>
+<div><dt>Last restore exercise</dt><dd>{% if exercise %}{{ exercise.checked_at[:16].replace('T', ' ') }} · {{ exercise.archive }} · {{ exercise.rows }} rows, {{ exercise.files }} files{% if exercise.used_entered_code %} · opened with the typed code{% endif %}{% else %}never — run one below{% endif %}</dd></div>
+</dl><p class="muted">Snapshots run every few hours while the app is running and when you press Back up now. A stopped app makes no backups; the next start catches up.</p>
+<h3>Snapshots</h3><ul>{% for path in snapshots %}<li><a href="/recovery/download/{{ path.name }}">{{ path.name }}</a> ({{ (path.stat().st_size / 1048576)|round(1) }} MB)</li>{% else %}<li class="muted">None yet.</li>{% endfor %}</ul>
+{% if legacy %}<h3>Earlier unencrypted backups</h3><ul>{% for path in legacy %}<li><a href="/storage/download/{{ path.name }}">{{ path.name }}</a></li>{% endfor %}</ul>{% endif %}</article>
+<article class="panel"><h2>Off this computer</h2>
+{% if not status.key_configured %}<p>No recovery code yet. Off-site backups stay off until you create one, because an unencrypted copy of customer data should not leave this computer.</p>
+<form action="/recovery/key" method="post"><button class="button primary">Create recovery code</button></form>
+{% else %}<p>Recovery code id <code>{{ status.key_id }}</code>{% if not status.key_acknowledged %} — <strong>not yet confirmed as stored</strong>{% endif %}.</p>{% endif %}
+<dl class="totals-list">
+<div><dt>Destination</dt><dd>{% if status.remote_destination %}Google Drive recovery folder{% else %}none — add one on <a href="/connections">Connections</a>{% endif %}</dd></div>
+<div><dt>Last verified upload</dt><dd>{{ status.last_remote_verified_at or 'none yet' }}</dd></div>
+<div><dt>Waiting to upload</dt><dd>{{ status.pending_uploads }}{% for error in status.pending_errors %}<br><small>{{ error }}</small>{% endfor %}</dd></div>
+</dl>
+<h3>Restore exercise</h3><p>Decrypts the newest archive, restores it into a new empty folder, checks the database integrity and that every table and file matches the manifest, then deletes the exercise copy.</p>
+<form action="/recovery/exercise" method="post" class="stack-form"><label>Recovery code (optional — leave empty to use the stored one; type it to prove the written copy works)<input name="code" autocomplete="off"></label><button class="button">Run restore exercise</button></form>
+<h3>Uploads</h3><ul>{% for item in uploads %}<li>{{ item.filename }} · {{ item.state }}{% if item.verified_at %} · verified {{ item.verified_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}{% if item.last_error %} · {{ item.last_error }}{% endif %}</li>{% else %}<li class="muted">No off-site uploads yet.</li>{% endfor %}</ul>
+<p class="muted">Synchronising a live database file through a desktop sync folder is not a backup; these archives are consistent snapshots. Restoring records does not restore Google connections: reconnect accounts on the new computer.</p></article>
+</section>
+{% endblock %}

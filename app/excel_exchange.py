@@ -166,8 +166,7 @@ def export_editable(db, blank=False):
     meta.append(['ALINA_EDITABLE_V1',token])
     meta.sheet_state = 'veryHidden'
     token_path(token,'json').write_text(json.dumps(baseline, ensure_ascii=False), encoding='utf-8')
-    from app.storage import mark_dirty
-    mark_dirty()  # The comparison baseline must be backed up even before an upload.
+    # The baseline file is part of recovery snapshots (data/excel-exchange is in the fingerprint).
     stream = io.BytesIO()
     wb.save(stream)
     return stream.getvalue()

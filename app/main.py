@@ -69,7 +69,7 @@ from app.season_builder import build_season_draft, create_season_workspace, inta
 from app.services import customer_ready_due, customer_statement, dashboard_data, factory_ready_due, order_rule, order_summary, shipment_summary
 from app.validation import validate_system
 from app.worksheet_routes import render_worksheet, install_worksheet, amount_value
-from app.storage import install_storage, backup_worker
+from app.storage import install_storage
 from app.intake_archive import archive_sources, bundle_path, install_intake_sources
 
 
@@ -89,7 +89,7 @@ STATUSES = [
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    workers = [asyncio.create_task(backup_worker())]
+    workers = []
     if settings.background_worker:
         from app import jobs
         from app.database import SessionLocal
@@ -2264,3 +2264,9 @@ from app.intake_routes import install_intake
 install_intake(app, templates, context)
 from app.inbox_routes import install_inbox
 install_inbox(app, templates, context)
+from app.connections_routes import install_connections
+install_connections(app, templates, context)
+from app.recovery_routes import install_recovery
+install_recovery(app, templates, context)
+# Register background job handlers and schedulers.
+from app import outbox as _outbox, sync as _sync  # noqa: E402,F401

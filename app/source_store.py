@@ -176,3 +176,21 @@ def set_state(item: SourceItem, state: str, reason: str | None = None) -> None:
         raise CaptureError(f"Unknown inbox state {state}.")
     item.state = state
     item.state_reason = reason
+
+
+def attach_content(db: Session, item: SourceItem, content: bytes, media_type: str | None = None, root: Path | None = None) -> SourceItem:
+    """Store bytes for an inbox item that was recorded without content (a failed download)."""
+    if len(content) > MAX_SOURCE_BYTES:
+        raise CaptureError(f"{item.original_name or 'Item'} is larger than {MAX_SOURCE_BYTES // (1024 * 1024)} MB.")
+    detected = sniff_media_type(content, media_type or item.media_type, item.original_name)
+    digest, relative = _store_bytes(content, root)
+    blob = db.scalar(select(SourceBlob).where(SourceBlob.sha256 == digest))
+    if blob is None:
+        blob = SourceBlob(sha256=digest, size_bytes=len(content), media_type=detected, storage_path=relative)
+        db.add(blob)
+        db.flush()
+    item.blob_id, item.media_type = blob.id, detected
+    item.attempts += 1
+    set_state(item, "captured", "Captured on retry")
+    db.flush()
+    return item

@@ -30,11 +30,15 @@ import pytest  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def isolate_backup_runtime(tmp_path, monkeypatch):
-    from app import storage, main
-    async def test_worker():
-        await asyncio.Event().wait()
-    monkeypatch.setattr(main, 'backup_worker', test_worker)
-    monkeypatch.setattr(storage, 'PRIVATE', tmp_path/'storage-private')
-    monkeypatch.setattr(storage, 'BACKUPS', tmp_path/'verified-backups')
+    from app import storage
+    monkeypatch.setattr(storage, 'LEGACY_BACKUPS', tmp_path/'verified-backups')
     from app import intake_archive
     monkeypatch.setattr(intake_archive, 'ARCHIVE_DIR', tmp_path/'intake-sources')
+    # Secrets, recovery state, snapshots, outbox files and stored sources stay inside the test's folder.
+    from app import outbox, recovery, secret_store, source_store
+    monkeypatch.setattr(secret_store, 'PRIVATE', tmp_path/'private')
+    monkeypatch.setattr(recovery, 'ROOT_DIR', tmp_path)
+    monkeypatch.setattr(outbox, 'ROOT_DIR', tmp_path)
+    monkeypatch.setattr(outbox, 'OUTBOX_DIR', tmp_path/'data'/'outbox')
+    monkeypatch.setattr(outbox, 'ENCRYPTED_DIR', tmp_path/'backups'/'recovery'/'encrypted')
+    monkeypatch.setattr(source_store, 'ROOT_DIR', tmp_path)

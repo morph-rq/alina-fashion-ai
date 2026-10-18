@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Connections · {{ app_name }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<section class="page-head"><div><p class="eyebrow">Google Drive · Gmail</p><h1>Connections</h1>
+<p>Bring selected evidence into the source inbox, send exports and encrypted recovery archives to Drive. Incoming items never post orders or payments by themselves: each one is reviewed in an intake and saved by you.</p></div>
+<div><a class="button" href="/inbox">Source inbox</a> <a class="button" href="/recovery">Recovery</a></div></section>
+{% if message %}<p class="notice">{{ message }}</p>{% endif %}{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<p class="muted">Syncing runs only while this app is running (polling every 15 minutes by default). After a stop it catches up from saved checkpoints at the next start.
+Background queue: {% for kind, states in queue.items() %}{{ kind }} {% for name, count in states.items() %}{{ name }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}; {% endif %}{% else %}empty{% endfor %}.</p>
+
+{% if not client_configured %}
+<section class="panel"><h2>1. One-time Google setup</h2>
+<p>Create an OAuth client of type <strong>Web application</strong> in Google Cloud, enable the Google Drive API and Gmail API, and add this exact redirect URI:</p>
+<p><code>{{ redirect_uri }}</code></p>
+<p>Then upload the client JSON here (stored protected on this computer), or set <code>FASHION_GOOGLE_CLIENT_ID</code> and <code>FASHION_GOOGLE_CLIENT_SECRET</code> in <code>.env</code>. See <code>docs/drive-gmail-setup.md</code>.</p>
+<form action="/connections/google/client" method="post" enctype="multipart/form-data" class="stack-form"><input type="file" name="file" accept=".json,application/json" required><button class="button">Save Google client</button></form>
+</section>
+{% endif %}
+
+<section class="panel"><h2>{{ 'Connect another account' if connections else '2. Connect a Google account' }}</h2>
+<form action="/connections/google/start" method="post" class="stack-form">
+<fieldset><legend>What should this connection be allowed to do?</legend>
+<label><input type="checkbox" name="drive_files" value="1" checked> Pick individual Drive files and write exports / recovery archives</label><small>{{ explanations[scopes.SCOPE_DRIVE_FILE] }}</small>
+<label><input type="checkbox" name="drive_folder" value="1"> Watch a Drive folder unattended</label><small>{{ explanations[scopes.SCOPE_DRIVE_READONLY] }}</small>
+<label><input type="checkbox" name="gmail" value="1"> Read e-mail matching a query (read-only)</label><small>{{ explanations[scopes.SCOPE_GMAIL_READONLY] }}</small>
+</fieldset>
+<p class="muted">While the Google Cloud project is in “Testing” status, Google expires its authorisation after 7 days; you will see “Reconnect” here. Restricted permissions (folder watch, Gmail) show an “unverified app” warning unless the project is verified.</p>
+<label><input type="checkbox" name="understood" value="1" required> I have read what each permission allows.</label>
+<button class="button primary" {{ 'disabled' if not client_configured }}>Continue to Google</button></form></section>
+
+{% for connection in connections %}
+<section class="panel" id="connection-{{ connection.id }}">
+<div class="intake-head"><div><h2>{{ connection.account_email }}</h2>
+<span class="state state-{{ 'saved' if connection.status == 'connected' else 'failed' if connection.status == 'needs_reconnect' else 'collecting' }}">{{ connection.status.replace('_', ' ') }}</span>
+{% if connection.status_reason %}<small>{{ connection.status_reason }}</small>{% endif %}
+<br><small>Permissions: {% for scope in connection.granted_scopes.split() if scope.startswith('https://') %}{{ scope.rsplit('/', 1)[-1] }}{% if not loop.last %}, {% endif %}{% else %}identity only{% endfor %} · last success {{ connection.last_success_at.strftime('%Y-%m-%d %H:%M') if connection.last_success_at else 'never' }}</small></div>
+<div class="review-actions">
+<form action="/connections/{{ connection.id }}/sync" method="post"><button class="button">Sync now</button></form>
+<form action="/connections/{{ connection.id }}/pause" method="post"><button class="button">{{ 'Resume' if connection.status == 'paused' else 'Pause' }}</button></form>
+<form action="/connections/google/start" method="post"><input type="hidden" name="connection_id" value="{{ connection.id }}"><input type="hidden" name="understood" value="1"><button class="button">Reconnect</button></form>
+<form action="/connections/{{ connection.id }}/disconnect" method="post"><input name="confirm" placeholder="Type DISCONNECT" required><button class="button danger">Disconnect</button></form>
+</div></div>
+<table class="data-table"><thead><tr><th>Source / destination</th><th>Checkpoint</th><th>Last sync</th><th>Recent runs</th><th></th></tr></thead><tbody>
+{% for source in connection.sources %}<tr><td class="text"><strong>{{ source.name }}</strong><br><small>{{ source.kind.replace('_', ' ') }}{% if source.start_date %} · from {{ source.start_date }}{% endif %}{% if not source.active %} · paused{% endif %}</small>{% if source.last_error %}<br><small class="state state-failed">{{ source.last_error }}</small>{% endif %}</td>
+<td><small>{{ source.checkpoint_kind or ('n/a' if source.kind.startswith('drive_o') or source.kind.startswith('drive_r') else 'first sync pending') }}</small></td>
+<td>{{ source.last_success_at.strftime('%Y-%m-%d %H:%M') if source.last_success_at else '—' }}</td>
+<td><small>{% for run in runs.get(source.id, []) %}{{ run.started_at.strftime('%m-%d %H:%M') }} {{ run.status }}: {{ run.captured }} new, {{ run.duplicates }} known, {{ run.failed }} failed{% if run.note %} — {{ run.note }}{% endif %}<br>{% else %}no runs yet{% endfor %}</small></td>
+<td><form action="/connections/sources/{{ source.id }}/toggle" method="post"><button class="button small-button">{{ 'Pause' if source.active else 'Resume' }}</button></form>
+{% if source.kind == 'gmail_query' %}<form action="/connections/sources/{{ source.id }}/backfill" method="post"><input type="date" name="start_date" required><button class="button small-button">Backfill from date</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">Nothing selected yet. Add an incoming source or a destination below.</td></tr>{% endfor %}
+</tbody></table>
+<details><summary>Add incoming evidence or a destination</summary>
+{% if scopes.SCOPE_GMAIL_READONLY in connection.granted_scopes %}<form action="/connections/{{ connection.id }}/sources" method="post" class="stack-form"><input type="hidden" name="kind" value="gmail_query">
+<label>Gmail search (the import boundary)<input name="query" required placeholder="label:alina-orders"></label><label>Only mail from<input type="date" name="start_date"></label>
+<label>Check every (minutes)<input name="interval_minutes" type="number" min="5" value="15"></label><button class="button">Add Gmail source</button></form>{% endif %}
+{% if scopes.SCOPE_DRIVE_READONLY in connection.granted_scopes %}<form action="/connections/{{ connection.id }}/sources" method="post" class="stack-form"><input type="hidden" name="kind" value="drive_folder">
+<label>Drive folder link or id<input name="folder" required></label><label>Name<input name="name" placeholder="Supplier orders"></label><button class="button">Watch folder</button></form>{% endif %}
+{% if scopes.SCOPE_DRIVE_FILE in connection.granted_scopes %}
+{% if picker_ready %}<form action="/connections/{{ connection.id }}/sources" method="post" id="picker-form-{{ connection.id }}"><input type="hidden" name="kind" value="drive_file"><input type="hidden" name="files" value="[]">
+<button class="button" type="button" data-picker="{{ connection.id }}">Pick Drive files…</button></form>{% else %}<p class="muted">To pick individual Drive files, set FASHION_GOOGLE_API_KEY and FASHION_GOOGLE_APP_ID (see the setup guide).</p>{% endif %}
+<form action="/connections/{{ connection.id }}/sources" method="post"><input type="hidden" name="kind" value="drive_outputs"><button class="button">Add exports folder</button></form>
+<form action="/connections/{{ connection.id }}/sources" method="post"><input type="hidden" name="kind" value="drive_recovery"><button class="button">Add recovery archive folder</button></form>
+<form action="/connections/{{ connection.id }}/publish-exports" method="post"><button class="button">Upload current season workbooks</button></form>{% endif %}
+</details>
+</section>
+{% endfor %}
+
+<section class="panel"><h2>Outgoing files</h2><p>{{ pending_outbox }} waiting or failed. Files queue locally while offline and upload later; an upload counts only when Drive's checksum matches.</p>
+<ul>{% for item in outbox %}<li>{{ item.kind }} · {{ item.filename }} · {{ item.state }}{% if item.last_error %} · {{ item.last_error }}{% endif %}</li>{% else %}<li class="muted">Nothing sent yet.</li>{% endfor %}</ul></section>
+
+{% if picker_ready %}
+<script src="https://apis.google.com/js/api.js"></script>
+<script>
+document.querySelectorAll('[data-picker]').forEach(function (button) {
+  button.addEventListener('click', function () {
+    var id = button.dataset.picker;
+    fetch('/connections/' + id + '/picker-token', { headers: { Accept: 'application/json' } }).then(function (r) { return r.json(); }).then(function (body) {
+      gapi.load('picker', function () {
+        var picker = new google.picker.PickerBuilder()
+          .addView(new google.picker.DocsView().setIncludeFolders(true).setSelectFolderEnabled(false))
+          .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+          .setOAuthToken(body.access_token).setDeveloperKey({{ api_key|tojson }}).setAppId({{ app_id|tojson }})
+          .setCallback(function (data) {
+            if (data.action !== google.picker.Action.PICKED) return;
+            var form = document.getElementById('picker-form-' + id);
+            form.files.value = JSON.stringify(data.docs.map(function (doc) { return { id: doc.id, name: doc.name }; }));
+            form.submit();
+          }).build();
+        picker.setVisible(true);
+      });
+    });
+  });
+});
+</script>
+{% endif %}
+{% endblock %}

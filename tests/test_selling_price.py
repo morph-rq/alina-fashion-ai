@@ -38,7 +38,7 @@ def test_custom_price_preserves_cost_and_flows_to_statements_exports_and_profit(
     sheet = load_workbook(BytesIO(export.content))["Products"]
     assert sheet["K5"].value == 100
     assert sheet["M5"].value == 115.25
-    assert sheet["N5"].value == "=IFERROR(M5*J5,0)"
+    assert sheet["N5"].value == '=IF(O5="Cancelled",0,ROUND(M5*J5,2))'
     assert 'value="115.25"' in response.text
     assert "230.50" in workspace_client.get(f"/customers/{item.customer_id}").text
     pdf = build_customer_pdf(workspace_session, item.customer_id, output_dir=tmp_path, season_name="AW26")

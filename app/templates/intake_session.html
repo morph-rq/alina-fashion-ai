@@ -86,7 +86,7 @@
     <ul class="sources">
     {% for source in session.sources %}<li id="source-{{ source.id }}">
       <strong>#{{ source.id }} {{ source.original_name or source.channel }}</strong> <span class="state state-{{ source.state }}">{{ source.state.replace('_', ' ') }}</span>
-      <br><small>{{ source.channel }} · {{ source.media_type }}{% if source.blob %} · {{ (source.blob.size_bytes / 1024)|round(1) }} KB · sha256 {{ source.blob.sha256[:10] }}…{% endif %}</small>
+      <br><small>{{ source.channel }} · {{ source.media_type }}{% if source.blob %} · {{ source.blob.size_bytes if source.blob.size_bytes < 1024 else ((source.blob.size_bytes / 1024)|round(1)) }} {{ "bytes" if source.blob.size_bytes < 1024 else "KB" }} · sha256 {{ source.blob.sha256[:10] }}…{% endif %}</small>
       {% if source.state_reason %}<br><small>{{ source.state_reason }}</small>{% endif %}
       {% if source.blob %}{% if source.media_type.startswith('image/') %}<a href="/sources/{{ source.id }}/content" target="_blank" rel="noopener"><img src="/sources/{{ source.id }}/content" alt="Attachment {{ source.original_name }}" loading="lazy"></a>
       {% else %}<br><a href="/sources/{{ source.id }}/content" target="_blank" rel="noopener">Open original</a>{% endif %}{% endif %}

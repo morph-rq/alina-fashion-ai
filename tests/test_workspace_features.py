@@ -184,7 +184,7 @@ def test_global_search_finds_records_and_excel_export_is_editable(workspace_clie
     assert {"Summary", "Products", "Orders", "Customers", "Rules", "Collections"}.issubset(workbook.sheetnames)
     products = workbook["Products"]
     assert products["F5"].value == "COAT-1"
-    assert products["M5"].value == "=IFERROR(K5*(1+L5),0)"
-    assert products["N5"].value == "=IFERROR(M5*J5,0)"
+    assert products["M5"].value == '=IF(O5="Cancelled",0,ROUND(K5*(1+L5),2))'
+    assert products["N5"].value == '=IF(O5="Cancelled",0,ROUND(K5*J5,2)+ROUND(ROUND(K5*J5,2)*L5,2))'
     assert products.freeze_panes == "A5"
     assert products.tables

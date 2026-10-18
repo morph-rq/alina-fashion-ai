@@ -1867,12 +1867,25 @@ def export_season_excel(season_id: int, db: Session = Depends(get_db)):
 
 @app.get("/exports/customers/{customer_id}.xlsx")
 def export_customer_excel(customer_id: int, season: str = "", db: Session = Depends(get_db)):
+    """Customer-facing workbook (allowlisted fields only; safe to share with that customer)."""
+    from app.customer_export import customer_workbook
+    try:
+        current = selected_season(db, season) if season else None
+        content = customer_workbook(db, customer_id, current.id if current else None)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+    return _excel_response(content, f"statement-customer-{customer_id}.xlsx")
+
+
+@app.get("/exports/customers/{customer_id}/internal.xlsx")
+def export_customer_internal_excel(customer_id: int, season: str = "", db: Session = Depends(get_db)):
+    """Internal business workbook filtered to one customer (contains wholesale costs; do not share)."""
     try:
         current = selected_season(db, season) if season else None
         content = build_business_workbook(db, customer_id=customer_id, season_id=current.id if current else None)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from None
-    return _excel_response(content, f"fashion-customer-{customer_id}.xlsx")
+    return _excel_response(content, f"internal-customer-{customer_id}.xlsx")
 
 
 @app.get("/exports/collections/{collection_id}.xlsx")

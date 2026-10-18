@@ -105,7 +105,8 @@ def export_editable(db, blank=False):
         cell.font = Font(color='FFFFFF', bold=True)
     for index in range(2, ws.max_row + 1):
         ws[f'U{index}'] = f'=IF(M{index}<>"",M{index},IF(K{index}="","",ROUND(K{index}*(1+L{index}/100),2)))'
-        ws[f'V{index}'] = f'=IF(U{index}="","",ROUND(U{index}*J{index},2))'
+        # Line total uses the app's rounding: rounded line base plus rounded markup.
+        ws[f'V{index}'] = f'=IF(U{index}="","",IF(M{index}<>"",ROUND(M{index}*J{index},2),ROUND(K{index}*J{index},2)+ROUND(ROUND(K{index}*J{index},2)*L{index}/100,2)))'
     widths = [9,12,18,17,25,23,32,18,12,12,20,12,24,20,12,38,23,23,23,28,24,24]
     for idx, width in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(1,idx).column_letter].width = width

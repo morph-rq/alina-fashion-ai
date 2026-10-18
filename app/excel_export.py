@@ -78,8 +78,8 @@ def _new_data_sheet(workbook: Workbook, title: str, subtitle: str, headers: list
     for row_index, row in enumerate(rows, 5):
         for column, value in enumerate(row, 1):
             cell = sheet.cell(row_index, column, value)
-            if isinstance(value, str) and value.startswith(('=', '+', '-', '@')):
-                cell.data_type = 's'  # Source text must never become an executable Excel formula.
+            if isinstance(value, str):
+                cell.data_type = 's'  # Text (SKUs, names, notes) is never interpreted as a formula or number.
             cell.font = Font(name="Aptos", size=9, color=INK)
             cell.alignment = Alignment(vertical="top", wrap_text=column in {5, 7, 19, 20, 24})
             if row_index % 2 == 0:
@@ -232,23 +232,30 @@ def build_business_workbook(
             item.purchase_group.distributor.name if item.purchase_group and item.purchase_group.distributor else None,
             item.purchase_group.seller if item.purchase_group else None,
             _number(cost_shares.get(item.id,0)), item.worksheet_note,
+            _number(item_amounts(item).final) if item.status != "Cancelled" else 0, item.revision,
         ])
     products = _new_data_sheet(workbook, "Products", subtitle, [
         "ID", "Season", "Brand", "Customer code", "Customer", "Article / SKU", "Product", "Color", "Size", "Quantity",
         "Wholesale unit", "Markup", "Final unit", "Final total", "Status", "Ready batch", "Shipment",
         "Requested delivery", "Logistics", "Customer requirements", "Image path", "Product link", "Source file", "Source sheet", "Source row",
         "Worksheet status", "Group ID", "Shipment group", "Distributor", "Seller", "Group special cost share", "Worksheet note",
+        "App final total", "Row revision",
     ], product_rows, 1)
     for row_index, item in enumerate(items, 5):
         fill = PatternFill('solid', fgColor={'process':'FFF5C5','done':'E4F1DD','pending':'FFFFFF'}[status_of(item)])
         for cell in products[row_index]:
             cell.fill = fill
-        products.cell(row_index, 13, _number(item.selling_unit_price) if item.selling_unit_price is not None else f"=IFERROR(K{row_index}*(1+L{row_index}),0)")
-        products.cell(row_index, 14, f"=IFERROR(M{row_index}*J{row_index},0)")
+        # Same rounding as the Decimal engine: line base rounded, markup rounded, cancelled rows count 0.
+        r = row_index
+        products.cell(r, 13, _number(item.selling_unit_price) if item.selling_unit_price is not None else f'=IF(O{r}="Cancelled",0,ROUND(K{r}*(1+L{r}),2))')
+        if item.selling_unit_price is not None:
+            products.cell(r, 14, f'=IF(O{r}="Cancelled",0,ROUND(M{r}*J{r},2))')
+        else:
+            products.cell(r, 14, f'=IF(O{r}="Cancelled",0,ROUND(K{r}*J{r},2)+ROUND(ROUND(K{r}*J{r},2)*L{r},2))')
         if item.product_url:
             products.cell(row_index, 22).hyperlink = item.product_url
             products.cell(row_index, 22).style = "Hyperlink"
-    for column in (11, 13, 14):
+    for column in (11, 13, 14, 33):
         for cell in products.iter_cols(min_col=column, max_col=column, min_row=5, max_row=max(5, 4 + len(items))):
             for entry in cell:
                 entry.number_format = MONEY_FORMAT
@@ -262,8 +269,8 @@ def build_business_workbook(
 
     order_rows = []
     for order in orders:
-        wholesale_total = sum((item_amounts(item).base for item in order.items), Decimal("0"))
-        final_amount = sum((item_amounts(item).final for item in order.items), Decimal("0"))
+        wholesale_total = sum((item_amounts(item).base for item in order.items if item.status != "Cancelled"), Decimal("0"))
+        final_amount = sum((item_amounts(item).final for item in order.items if item.status != "Cancelled"), Decimal("0"))
         order_rows.append([
             order.id, order.season.name, order.brand.name, order.status, order.factory_ready_from, order.factory_ready_to,
             order.factory_ready_note, order.catalog_url, len(order.items), _number(wholesale_total),
@@ -385,7 +392,7 @@ def build_business_workbook(
     cards = [
         ("A6", "Products", len(items), "0"),
         ("C6", "Customers", len(customers), "0"),
-        ("E6", "Wholesale", f"=SUMPRODUCT('Products'!K5:K{product_end},'Products'!J5:J{product_end})", MONEY_FORMAT),
+        ("E6", "Wholesale", f'=SUMPRODUCT(ROUND(Products!K5:K{product_end}*Products!J5:J{product_end},2),--(Products!O5:O{product_end}<>"Cancelled"))', MONEY_FORMAT),
         ("G6", "Order revenue", f"=SUM('Products'!N5:N{product_end})", MONEY_FORMAT),
     ]
     for anchor, label, value, fmt in cards:
@@ -403,8 +410,9 @@ def build_business_workbook(
     summary["A11"].font = Font(name="Aptos Display", size=14, bold=True, color=INK)
     notes = [
         "Use the filters in row 4 of each data sheet to find exactly what you need.",
-        "Products keeps wholesale price and markup as editable inputs; Final unit and Final total are formulas.",
-        "The app remains the source of truth. This file is an export for review, sharing, and further analysis.",
+        "Products keeps wholesale price and markup as inputs; Final unit and Final total are formulas using the app's cent rounding.",
+        "App final total is the authoritative amount from the app. The Checks sheet compares it with the formulas once Excel has calculated.",
+        "The app remains the source of truth. To change records, use the editable order workbook (Excel files) or the app.",
         "Links remain clickable. Product images are listed by their managed path rather than embedded at full resolution.",
     ]
     for row_index, note in enumerate(notes, 12):
@@ -450,9 +458,143 @@ def build_business_workbook(
         _new_data_sheet(workbook, 'Seller ledger', subtitle,
             ['Entry ID','Date','Account ID','Operation','Stage','Movement','Reference','Operation key'],
             [[e.id,e.date,e.account_id,e.kind,e.stage,float(e.amount),e.reference,e.operation_key] for e in entries],32)
+    if not customer_id and not collection_id:
+        _master_summary(workbook, orders, items, subtitle)
+        brand_views(workbook, products, items)
+    _checks_sheet(workbook, db, items, orders, scope_title, generated)
     for table in products.tables.values():
         table.tableStyleInfo.showRowStripes = False
     products.freeze_panes = 'A5'
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+EXPORT_SCHEMA = "alina-business-workbook/2"
+
+
+def _master_summary(workbook, orders, items, subtitle) -> None:
+    """Brand + Season summary linked to Products (initial due shown from the app)."""
+    from app.services import client_initial_charges
+    shipment_names = sorted({item.shipment.name for item in items if item.shipment})
+    rows = []
+    for order in orders:
+        app_initial = sum(client_initial_charges(order).values(), Decimal("0"))
+        rows.append([order.season.name, order.brand.name, None, _number(app_initial), None,
+                     *([None] * len(shipment_names)), None, order.factory_ready_from, order.factory_ready_to, order.factory_ready_note])
+    master = _new_data_sheet(workbook, "Master summary", "Brand + Season summary · linked to Products · initial due as calculated by the app",
+                             ["Season", "Brand", "Order value", "Initial due (app)", "Ready (not shipped)", *shipment_names,
+                              "Saldo", "Factory ready from", "Factory ready to", "Readiness note"], rows, 70)
+    last = max(5, len(items) + 4)
+    saldo_col = 6 + len(shipment_names)
+    for row in range(5, len(orders) + 5):
+        base = f"SUMIFS(Products!$N$5:$N${last},Products!$B$5:$B${last},A{row},Products!$C$5:$C${last},B{row}"
+        master.cell(row, 3, "=" + base + ")")
+        master.cell(row, 5, "=" + base + f',Products!$P$5:$P${last},"<>",Products!$Q$5:$Q${last},"")')
+        for col, name in enumerate(shipment_names, 6):
+            master.cell(row, col, "=" + base + f",Products!$Q$5:$Q${last},{get_column_letter(col)}$4)")
+        master.cell(row, saldo_col, f"=C{row}-SUM(E{row}:{get_column_letter(saldo_col - 1)}{row})")
+        for col in [3, 4, 5, *range(6, saldo_col + 1)]:
+            master.cell(row, col).number_format = MONEY_FORMAT
+        for col in (saldo_col + 1, saldo_col + 2):
+            master.cell(row, col).number_format = DATE_FORMAT
+    _finish_widths(master, [14, 24, 18, 18, 18] + [18] * len(shipment_names) + [18, 22, 22, 36])
+    workbook.move_sheet(master, offset=1 - workbook.worksheets.index(master))
+
+
+def brand_views(workbook, products, items) -> None:
+    """One tab per brand whose cells link to Products, so edits stay in one place."""
+    from copy import copy
+    import re as _re
+    grouped: dict[str, list] = {}
+    for source_row, item in enumerate(items, 5):
+        grouped.setdefault(item.order.brand.name, []).append(source_row)
+    used = set(workbook.sheetnames)
+    for index, (brand, members) in enumerate(grouped.items(), 1):
+        title = (_re.sub(r"[\[\]:*?/\\]", "-", brand)[:26] or "Brand").strip()
+        while title in used:
+            title = f"{title[:24]} {index}"
+        used.add(title)
+        sheet = _new_data_sheet(workbook, title, "Linked to Products · change values there or in the app",
+                                ["Article / SKU", "Product", "Customer", "Color", "Size", "Quantity", "Wholesale unit",
+                                 "Markup", "Final total", "Status", "Ready batch", "Shipment"], [], 100 + index)
+        for row, source_row in enumerate(members, 5):
+            for col, source_col in enumerate([6, 7, 4, 8, 9, 10, 11, 12, 14, 15, 16, 17], 1):
+                original = products.cell(source_row, source_col)
+                cell = sheet.cell(row, col, f'=IF(Products!{original.coordinate}="","",Products!{original.coordinate})')
+                cell._style = copy(original._style)
+        _finish_widths(sheet, [20, 30, 13, 16, 10, 10, 15, 10, 16, 16, 16, 16])
+
+
+def _checks_sheet(workbook, db, items, orders, scope_title, generated) -> None:
+    """Export metadata and reconciliation rows (formula result vs. authoritative app amount)."""
+    from sqlalchemy import func
+    from app.models import AuditLog
+    active = [item for item in items if item.status != "Cancelled"]
+    last = max(5, len(items) + 4)
+    app_total = sum((item_amounts(item).final for item in active), Decimal("0"))
+    sheet = workbook.create_sheet("Checks")
+    sheet["A1"] = "Export checks"
+    sheet["A1"].font = Font(name="Aptos Display", size=16, bold=True, color=INK)
+    meta = [("Scope", scope_title), ("Generated", generated.strftime("%Y-%m-%d %H:%M:%S %Z")), ("Workbook schema", EXPORT_SCHEMA),
+            ("Products", len(items)), ("Highest product revision", max((item.revision for item in items), default=0)),
+            ("Last audit entry", db.scalar(select(func.max(AuditLog.id))) or 0)]
+    for row, (label, value) in enumerate(meta, 3):
+        sheet.cell(row, 1, label).font = Font(bold=True)
+        cell = sheet.cell(row, 2, value)
+        if isinstance(value, str):
+            cell.data_type = "s"
+    header = len(meta) + 4
+    for col, title in enumerate(["Check", "Formula result", "App amount", "Status"], 1):
+        sheet.cell(header, col, title).font = Font(bold=True)
+    checks = [("Products: final total", f"=SUM(Products!N5:N{last})", app_total)]
+    for order in orders:
+        value = sum((item_amounts(item).final for item in order.items if item.status != "Cancelled" and item in items), Decimal("0"))
+        checks.append((f"{order.season.name} / {order.brand.name}",
+                       f'=SUMIFS(Products!$N$5:$N${last},Products!$B$5:$B${last},"{order.season.name}",Products!$C$5:$C${last},"{order.brand.name.replace(chr(34), chr(39))}")', value))
+    for offset, (label, formula, value) in enumerate(checks, header + 1):
+        sheet.cell(offset, 1, label).data_type = "s"
+        sheet.cell(offset, 2, formula).number_format = MONEY_FORMAT
+        sheet.cell(offset, 3, _number(value)).number_format = MONEY_FORMAT
+        sheet.cell(offset, 4, f'=IF(ABS(B{offset}-C{offset})<0.005,"OK","CHECK")')
+    sheet.cell(header + len(checks) + 2, 1, "Formula results appear after Excel or another spreadsheet application calculates the file. "
+               "The app amounts are fixed values from the export moment.").alignment = Alignment(wrap_text=True)
+    _finish_widths(sheet, [42, 18, 18, 12])
+
+
+def verify_business_workbook(content: bytes) -> list[str]:
+    """Recompute the Products formulas' rule from the cell inputs and compare with the app amounts.
+
+    openpyxl does not calculate formulas, so this checks that each row's formula
+    encodes the Decimal rule and that its inputs reproduce the authoritative amount.
+    """
+    from decimal import ROUND_HALF_UP
+    from openpyxl import load_workbook
+    def rounded(value):
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    problems = []
+    sheet = load_workbook(BytesIO(content))["Products"]
+    for row in range(5, sheet.max_row + 1):
+        if sheet.cell(row, 1).value is None:
+            continue
+        quantity, unit, markup = sheet.cell(row, 10).value, sheet.cell(row, 11).value, sheet.cell(row, 12).value
+        override, status, expected = sheet.cell(row, 13).value, sheet.cell(row, 15).value, Decimal(str(sheet.cell(row, 33).value or 0))
+        formula = sheet.cell(row, 14).value
+        if status == "Cancelled":
+            computed = Decimal("0")
+        elif isinstance(override, (int, float)):
+            if formula != f'=IF(O{row}="Cancelled",0,ROUND(M{row}*J{row},2))':
+                problems.append(f"Row {row}: unexpected override formula")
+            computed = rounded(Decimal(str(override)) * quantity)
+        else:
+            if formula != f'=IF(O{row}="Cancelled",0,ROUND(K{row}*J{row},2)+ROUND(ROUND(K{row}*J{row},2)*L{row},2))':
+                problems.append(f"Row {row}: unexpected total formula")
+            base = rounded(Decimal(str(unit or 0)) * quantity)
+            computed = base + rounded(base * Decimal(str(markup or 0)))
+        if computed != expected:
+            problems.append(f"Row {row}: formula rule gives {computed}, app amount is {expected}")
+        for column in (4, 6, 7, 9):
+            cell = sheet.cell(row, column)
+            if cell.value is not None and cell.data_type != "s":
+                problems.append(f"Row {row}: column {column} is not stored as text")
+    return problems

@@ -72,7 +72,7 @@ def test_library_supports_collections_and_standalone_brands(workspace_client: Te
     assert page.status_code == 200
     assert "Business library" in page.text
     assert "All stored documents" in page.text
-    assert "Product image" in page.text
+    assert "Product references" in page.text  # Product images were deliberately removed from the library in this copy.
 
     created = workspace_client.post("/library/collections", data={"name": "Client edit", "description": "For Maria"})
     assert created.status_code == 200

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.audit import record_change
 from app import ai_intake
 from app.brand_catalog import BRAND_SUGGESTIONS
-from app.calculations import ZERO, display_money, final_total, final_unit_price, item_amounts, money
+from app.calculations import PAYMENT_TYPE_LABELS, signed_payment_amount, ZERO, display_money, final_total, final_unit_price, item_amounts, money
 from app.config import ROOT_DIR, settings
 from app.database import Base, get_db, init_db
 from app.excel_export import build_business_workbook
@@ -59,6 +59,7 @@ from app.models import (
     SellerCreditAccount,
 )
 from app.pdf_report import build_all_customer_pdfs, build_customer_pdf
+from app.pricing import wholesale_from_final
 from app.operations import operations_inbox
 from app.ready_importer import process_ready_workbook
 from app.schemas import DashboardSummary, ValidationReportSchema
@@ -134,6 +135,8 @@ app.mount("/static", StaticFiles(directory=ROOT_DIR / "app" / "static"), name="s
 app.mount("/media", StaticFiles(directory=ROOT_DIR / "data" / "images"), name="media")
 templates = Jinja2Templates(directory=ROOT_DIR / "app" / "templates")
 templates.env.globals["item_amounts"] = item_amounts
+templates.env.globals["signed_payment"] = signed_payment_amount
+templates.env.globals["payment_labels"] = PAYMENT_TYPE_LABELS
 
 
 def money_filter(value) -> str:
@@ -880,10 +883,15 @@ def confirm_ai_intake(
     if stated <= ZERO:
         raise HTTPException(422, "Price must be positive")
     markup = order_rule(order).markup_percentage
-    wholesale = stated if price_type == "wholesale" else money(stated / (Decimal("1") + markup))
     selling_price = optional_selling_price(selling_unit_price)
     if selling_price is not None and price_type != "wholesale":
         raise HTTPException(422, "For a custom selling price, enter the actual wholesale cost as Stated price and choose Wholesale / factory.")
+    price_note = None
+    if price_type == "wholesale":
+        wholesale = stated
+    else:
+        reverse = wholesale_from_final(stated, markup)
+        wholesale, selling_price, price_note = reverse.wholesale, reverse.selling_unit_price, reverse.reason
     if not customer_name.strip():
         raise HTTPException(422, "Customer name is required")
     code = automatic_customer_code(db, customer_name)
@@ -942,7 +950,7 @@ def confirm_ai_intake(
     record_change(
         db, entity_type="OrderItem", entity_id=item.id, field=None, previous_value=None, new_value=item.article or item.name,
         source_user="AI intake form",
-        description=f"Created AI intake row for {code}: {order.brand.name} {item.article or item.name}",
+        description=f"Created AI intake row for {code}: {order.brand.name} {item.article or item.name}" + (f". {price_note}" if price_note else ""),
     )
     try:
         db.commit()
@@ -1475,7 +1483,7 @@ def ready_batches_page(request: Request, season: str = "", db: Session = Depends
     for batch in batches:
         value = money(sum((item_amounts(item).final for item in batch.items if item.status != "Cancelled"), ZERO))
         due = money(sum((item_amounts(item).final * order_rule(item.order).ready_balance_percentage for item in batch.items if item.status != "Cancelled"), ZERO))
-        customer_paid = money(sum(((-allocation.amount if allocation.payment.type == "refund" else allocation.amount) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
+        customer_paid = money(sum((signed_payment_amount(allocation.amount, allocation.payment.type) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
         factory_paid = money(sum(db.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id)).all(), ZERO))
         rows.append({"batch": batch, "value": value, "due": due, "customer_paid": customer_paid, "factory_paid": factory_paid})
     orders = db.scalars(

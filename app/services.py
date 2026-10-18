@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.calculations import AccountAmounts, OrderAmounts, ZERO, calculate_account, calculate_order, item_amounts, money, transport_fee
+from app.calculations import signed_payment_amount, AccountAmounts, OrderAmounts, ZERO, calculate_account, calculate_order, item_amounts, money, transport_fee
 from app.models import BrandSeasonRule, Customer, Expense, FactoryPayment, Order, OrderItem, Payment, PaymentAllocation, ReadyBatch, Season, Shipment, ShipmentItem
 from app.models import PurchaseGroup
 from app.worksheet import split_cost
@@ -139,7 +139,7 @@ def dashboard_data(session: Session, season_name: str | None = None) -> Dashboar
     rule_special_costs += sum(session.scalars(select(PurchaseGroup.special_cost).where(PurchaseGroup.season_id == season.id)), ZERO)
     expenses_total = money(sum((expense.amount for expense in expenses if not expense.order_id or expense.order_id in order_ids), ZERO) + rule_special_costs)
     shipment_fees_total = money(sum((item.total_fees for item in shipment_summaries.values()), ZERO))
-    paid = sum(((-payment.amount if payment.type == "refund" else payment.amount) for payment in session.scalars(select(Payment).where(Payment.season_id == season.id)).all()), ZERO)
+    paid = sum((signed_payment_amount(payment.amount, payment.type) for payment in session.scalars(select(Payment).where(Payment.season_id == season.id)).all()), ZERO)
     account = calculate_account(paid, money(totals.current_merchandise_charge + expenses_total + shipment_fees_total))
     factory_required = money(totals.required_prepayment + totals.ready_balance_due)
     factory_paid = money(sum(session.scalars(
@@ -197,7 +197,7 @@ def ready_collection_status(session: Session, batch_id: int) -> ReadyCollectionS
         customer_id = allocation.payment.customer_id
         if customer_id is None:
             continue
-        signed = -allocation.amount if allocation.payment.type == "refund" else allocation.amount
+        signed = signed_payment_amount(allocation.amount, allocation.payment.type)
         previous = collected.get(customer_id, ZERO)
         current = money(previous + signed)
         collected[customer_id] = current
@@ -332,7 +332,7 @@ def customer_statement(session: Session, customer_id: int, season_name: str | No
     payments = list(session.scalars(select(Payment).where(
         Payment.customer_id == customer.id, Payment.season_id == season.id
     ).order_by(Payment.date, Payment.id)).all())
-    paid = sum(((-payment.amount if payment.type == "refund" else payment.amount) for payment in payments), ZERO)
+    paid = sum((signed_payment_amount(payment.amount, payment.type) for payment in payments), ZERO)
     expected_receipts: dict[int, date | None] = {}
     for batch_id, batch_items in per_batch.items():
         batch = session.get(ReadyBatch, batch_id)

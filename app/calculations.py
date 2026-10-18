@@ -26,6 +26,15 @@ def display_money(value: Decimal | int | str | float | None) -> Decimal:
     return decimal_value(value).quantize(WHOLE, rounding=ROUND_HALF_UP)
 
 
+PAYMENT_TYPE_LABELS = {"payment": "Payment received", "refund": "Refund"}
+
+
+def signed_payment_amount(amount: Decimal | int | str | None, payment_type: str | None) -> Decimal:
+    """Customer receipts are stored as positive amounts; a refund reduces net payments."""
+    value = money(amount)
+    return -value if payment_type == "refund" else value
+
+
 def base_total(unit_price: Decimal | None, quantity: int) -> Decimal:
     return money(decimal_value(unit_price) * Decimal(quantity))
 

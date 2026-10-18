@@ -228,6 +228,11 @@ class OrderItem(Base):
     source_allocation_description: Mapped[str | None] = mapped_column(Text)
     allocation_status: Mapped[str] = mapped_column(String(30), default="Allocated")
     allocation_group_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    # Lineage of a partial-quantity split; the remainder points at the row it came from.
+    split_from_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"), index=True)
+    # Optimistic-concurrency revision; SQLAlchemy increments it on every update.
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    __mapper_args__ = {"version_id_col": revision}
     order: Mapped[Order] = relationship(back_populates="items")
     purchase_group: Mapped[PurchaseGroup | None] = relationship(back_populates="items")
     customer: Mapped[Customer | None] = relationship(back_populates="order_items")
@@ -355,6 +360,8 @@ class ImportReview(Base):
     raw_values: Mapped[str] = mapped_column(Text)
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default="Open")
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     import_batch: Mapped[ImportBatch] = relationship()
 
 
@@ -385,6 +392,8 @@ class AllocationReview(Base):
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), default="Open")
     resolved_customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     import_batch: Mapped[ImportBatch | None] = relationship()
     resolved_customer: Mapped[Customer | None] = relationship()
 

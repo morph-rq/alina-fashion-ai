@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.calculations import ZERO, item_amounts, money
+from app.calculations import signed_payment_amount, ZERO, item_amounts, money
 from app.models import AllocationReview, Customer, FactoryPayment, ImportChange, ImportReview, Order, OrderItem, Payment, PaymentAllocation, ReadyBatch, Season
 from app.services import customer_statement, order_rule
 
@@ -46,7 +46,7 @@ def operations_inbox(session: Session) -> list[OperationTask]:
     ).order_by(ReadyBatch.id)).all()
     for batch in batches:
         due = money(sum((item_amounts(item).final * order_rule(item.order).ready_balance_percentage for item in batch.items if item.status != "Cancelled"), ZERO))
-        collected = money(sum(((-allocation.amount if allocation.payment.type == "refund" else allocation.amount) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
+        collected = money(sum((signed_payment_amount(allocation.amount, allocation.payment.type) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
         factory_paid = money(sum(session.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id, FactoryPayment.stage == "ready")).all(), ZERO))
         if due > ZERO and collected < due:
             tasks.append(OperationTask("warning", f"Collect payments for {batch.name}", f"Collected {collected:,.2f} of {due:,.2f}; {money(due-collected):,.2f} remains.", f"/reports/customers-ready/{batch.id}.zip", "Generate affected PDFs"))

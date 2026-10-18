@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.calculations import ZERO, item_amounts, money
+from app.calculations import signed_payment_amount, ZERO, item_amounts, money
 from app.models import AllocationReview, Expense, FactoryPayment, ImportReview, Order, OrderItem, Payment, PaymentAllocation, ReadyBatch, Season, Shipment, ShipmentItem
 from app.services import country_is_transport_exempt, dashboard_data, item_transport_fee, order_rule, order_summary, ready_collection_status
 
@@ -93,7 +93,8 @@ def validate_system(session: Session) -> ValidationReport:
         issues.append(ValidationIssue("error", "DUPLICATE_SHIPMENT", f"Item appears in {count} shipments", f"Item {item_id}"))
     for group_id, customer_id, size, count in session.execute(
         select(OrderItem.allocation_group_id, OrderItem.customer_id, OrderItem.size, func.count())
-        .where(OrderItem.allocation_group_id.is_not(None), OrderItem.allocation_status == "Allocated")
+        .where(OrderItem.allocation_group_id.is_not(None), OrderItem.allocation_status == "Allocated",
+               OrderItem.split_from_item_id.is_(None))
         .group_by(OrderItem.allocation_group_id, OrderItem.customer_id, OrderItem.size)
         .having(func.count() > 1)
     ).all():
@@ -154,7 +155,7 @@ def validate_system(session: Session) -> ValidationReport:
         selectinload(ReadyBatch.payment_allocations).selectinload(PaymentAllocation.payment),
     )).all():
         due = money(sum((money(item_amounts(item).final * order_rule(item.order).ready_balance_percentage) for item in batch.items if item.status != "Cancelled"), ZERO))
-        customer_paid = money(sum(((-allocation.amount if allocation.payment.type == "refund" else allocation.amount) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
+        customer_paid = money(sum((signed_payment_amount(allocation.amount, allocation.payment.type) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
         factory_paid = money(sum(session.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id, FactoryPayment.stage == "ready")).all(), ZERO))
         if customer_paid != due:
             issues.append(ValidationIssue("warning", "READY_PAYMENT_MISMATCH", f"Required customer Ready payments {due}; allocated {customer_paid}", batch.name))
@@ -219,7 +220,7 @@ def validate_system(session: Session) -> ValidationReport:
                 issues.append(ValidationIssue("error", "CUSTOMER_PAYMENT_MISMATCH", "Allocated customer payment has no customer", f"Payment {allocation.payment_id}"))
                 continue
             key = (allocation.payment.customer_id, allocation.order_id)
-            signed = -allocation.amount if allocation.payment.type == "refund" else allocation.amount
+            signed = signed_payment_amount(allocation.amount, allocation.payment.type)
             initial_by_customer_order[key] = money(initial_by_customer_order.get(key, ZERO) + signed)
         for order in orders:
             rule = order_rule(order)

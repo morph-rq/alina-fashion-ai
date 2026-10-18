@@ -10,7 +10,7 @@ from app.calculations import calculate_order, item_amounts
 from app.main import projected_profit
 from app.models import AuditLog, OrderItem
 from app.pdf_report import build_customer_pdf
-from app.ready_importer import _clone_remainder
+from app.ready_importer import split_item
 from app.services import customer_statement
 from test_workspace_features import workspace_session, workspace_client
 
@@ -45,7 +45,7 @@ def test_custom_price_preserves_cost_and_flows_to_statements_exports_and_profit(
     pdf_text = " ".join(page.extract_text() for page in PdfReader(pdf).pages)
     assert "230.50" in pdf_text
     assert workspace_session.scalar(select(AuditLog).where(AuditLog.field == "selling_unit_price")) is not None
-    remainder = _clone_remainder(item, 1)
+    remainder = split_item(workspace_session, item, 1)
     assert item_amounts(remainder).final == D("115.25")
 
 

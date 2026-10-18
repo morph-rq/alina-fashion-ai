@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from PIL import Image as PILImage
 
-from app.calculations import item_amounts
+from app.calculations import PAYMENT_TYPE_LABELS, item_amounts, signed_payment_amount
 from app.config import ROOT_DIR, settings
 from app.models import Customer, Shipment
 from app.services import CustomerStatement, customer_statement
@@ -230,7 +230,12 @@ def build_customer_pdf(
     payment_rows = [["DATE", "PAYMENT", "AMOUNT"]]
     if statement.payments:
         for payment in statement.payments:
-            payment_rows.append([payment.date.isoformat(), "Payment received", fmt(payment.amount)])
+            payment_rows.append([
+                payment.date.isoformat(),
+                PAYMENT_TYPE_LABELS.get(payment.type, payment.type),
+                fmt(signed_payment_amount(payment.amount, payment.type)),
+            ])
+        payment_rows.append(["", "Net payments received", fmt(statement.account.total_paid)])
     else:
         payment_rows.append(["-", "No payments recorded", "0.00"])
     payments_table = Table(payment_rows, colWidths=[36 * mm, 108 * mm, 32 * mm], repeatRows=1)
@@ -245,7 +250,7 @@ def build_customer_pdf(
                 ("LINEBELOW", (0, 0), (-1, -1), 0.35, STONE),
                 ("TOPPADDING", (0, 0), (-1, -1), 2 * mm),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * mm),
-            ]
+            ] + ([("FONTNAME", (0, -1), (-1, -1), bold_font), ("LINEABOVE", (0, -1), (-1, -1), 0.7, INK)] if statement.payments else [])
         )
     )
     story.append(payments_table)

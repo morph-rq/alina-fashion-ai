@@ -18,6 +18,7 @@ from app.config import ROOT_DIR, settings
 from app.importer import normalized, parse_customer_allocations, parse_int
 from app.models import (
     Brand,
+    CollectionItem,
     Customer,
     CustomerAlias,
     ImportBatch,
@@ -65,30 +66,43 @@ def _truthy_ready(value: Any) -> bool:
     return normalized(value) in {"1", "yes", "y", "true", "ready", "готово", "pronto", "x"}
 
 
-def _clone_remainder(item: OrderItem, quantity: int) -> OrderItem:
-    return OrderItem(
-        order_id=item.order_id,
-        customer_id=item.customer_id,
-        ready_batch_id=None,
-        article=item.article,
-        name=item.name,
-        color=item.color,
-        size=item.size,
+# Columns that describe where a unit is in fulfilment rather than what it is.
+_SPLIT_RESET_FIELDS = {"id", "revision", "quantity", "ready_batch_id", "status", "source_total", "split_from_item_id"}
+
+
+def split_item(session: Session, item: OrderItem, quantity: int) -> OrderItem:
+    """Split ``quantity`` units off ``item`` into a new unfulfilled row.
+
+    Every descriptive, pricing, allocation and provenance column is copied, so the
+    remainder keeps its evidence trail; collection membership is copied too.
+    """
+    if not 0 < quantity < item.quantity:
+        raise ValueError("A split must leave units on both rows")
+    values = {
+        column.key: getattr(item, column.key)
+        for column in OrderItem.__mapper__.column_attrs
+        if column.key not in _SPLIT_RESET_FIELDS
+    }
+    remainder = OrderItem(
+        **values,
         quantity=quantity,
-        wholesale_unit_price=item.wholesale_unit_price,
-        selling_unit_price=item.selling_unit_price,
-        markup_percentage=item.markup_percentage,
+        split_from_item_id=item.id,
+        ready_batch_id=None,
         status="Ordered" if item.status == "Ready" else item.status,
-        image_path=item.image_path,
-        source_file=item.source_file,
-        source_sheet=item.source_sheet,
-        source_row=item.source_row,
         source_total=money((item.wholesale_unit_price or Decimal("0")) * quantity),
-        source_note=item.source_note,
-        source_allocation_description=item.source_allocation_description,
-        allocation_status=item.allocation_status,
-        allocation_group_id=f"{item.allocation_group_id or item.id}:split",
     )
+    item.quantity -= quantity
+    item.source_total = money((item.wholesale_unit_price or Decimal("0")) * item.quantity)
+    session.add(remainder)
+    session.flush()
+    for collection_id in session.scalars(select(CollectionItem.collection_id).where(CollectionItem.order_item_id == item.id)).all():
+        session.add(CollectionItem(collection_id=collection_id, order_item_id=remainder.id))
+    record_change(
+        session, entity_type="OrderItem", entity_id=remainder.id, field="split_from", previous_value=None,
+        new_value=item.id, source_user="Ready importer",
+        description=f"Split {quantity} unit(s) from row {item.id}; provenance copied",
+    )
+    return remainder
 
 
 def process_ready_workbook(
@@ -198,9 +212,8 @@ def process_ready_workbook(
                 break
             take = min(item.quantity, remaining)
             if take < item.quantity:
-                session.add(_clone_remainder(item, item.quantity - take))
-                item.quantity = take
-                item.source_total = money((item.wholesale_unit_price or Decimal("0")) * take)
+                # The remainder stays available to later rows of the same upload.
+                candidate_items.append(split_item(session, item, item.quantity - take))
             item.ready_batch_id = ready_batch.id
             item.status = "Ready"
             remaining -= take

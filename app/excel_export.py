@@ -12,7 +12,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.calculations import final_total, final_unit_price, item_amounts
+from app.calculations import PAYMENT_TYPE_LABELS, final_total, final_unit_price, item_amounts, signed_payment_amount
 from app.models import (
     Brand,
     BrandSeasonRule,
@@ -303,12 +303,13 @@ def build_business_workbook(
         rules_sheet.cell(row, 8).number_format = MONEY_FORMAT
     _finish_widths(rules_sheet, [8, 12, 22, 11, 13, 13, 11, 14, 18, 12, 17, 20, 36])
 
-    payment_rows = [[payment.id, payment.season.name if payment.season else None, payment.customer.code if payment.customer else None, payment.order.brand.name if payment.order else None, payment.date, _number(payment.amount), payment.type, payment.note] for payment in payments]
-    payments_sheet = _new_data_sheet(workbook, "Payments", subtitle, ["ID", "Season", "Customer", "Brand / order", "Date", "Amount", "Type", "Note"], payment_rows, 5)
+    payment_rows = [[payment.id, payment.season.name if payment.season else None, payment.customer.code if payment.customer else None, payment.order.brand.name if payment.order else None, payment.date, _number(payment.amount), PAYMENT_TYPE_LABELS.get(payment.type, payment.type), _number(signed_payment_amount(payment.amount, payment.type)), payment.note] for payment in payments]
+    payments_sheet = _new_data_sheet(workbook, "Payments", subtitle, ["ID", "Season", "Customer", "Brand / order", "Date", "Amount", "Type", "Net effect", "Note"], payment_rows, 5)
     for row in range(5, 5 + len(payments)):
         payments_sheet.cell(row, 5).number_format = DATE_FORMAT
         payments_sheet.cell(row, 6).number_format = MONEY_FORMAT
-    _finish_widths(payments_sheet, [8, 12, 13, 22, 13, 15, 14, 38])
+        payments_sheet.cell(row, 8).number_format = MONEY_FORMAT
+    _finish_widths(payments_sheet, [8, 12, 13, 22, 13, 15, 16, 15, 38])
 
     shipment_rows = []
     for shipment in shipments:

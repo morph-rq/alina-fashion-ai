@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}AI order intake - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="page-head ai-intake-head">
+  <div>
+    <p class="eyebrow">AI workspace</p>
+    <h1>Turn sources into an order table</h1>
+    <p>Write a note, attach source files, or dictate with your voice. AI reads images and documents, then builds a table for you to review.</p>
+  </div>
+</section>
+
+{% if error %}<section class="builder-message error" role="alert"><div><strong>Draft not created</strong><p>{{ error }}</p><a class="button" href="/ai-intake#multimodal-intake-form">Change source / try again →</a><a class="button" href="/excel">Use Excel template</a></div></section>{% endif %}
+{% if warning %}<section class="builder-message error"><div><strong>Note</strong><p>{{ warning }}</p></div></section>{% endif %}
+
+{% if not seasons %}
+<section class="ai-first-season">
+  <div class="ai-first-season-copy"><span class="ai-spark">AI</span><div><p class="eyebrow">One-time setup</p><h2>Start with the season</h2><p>Only the season is required. You can type or dictate the customer and brand later in the AI intake.</p></div></div>
+  {% if quick_error %}<div class="quick-error" role="alert"><strong>Please check this:</strong> {{ quick_error }}</div>{% endif %}
+  <form class="quick-season-form ai-season-form" action="/seasons/quick-create" method="post">
+    <input type="hidden" name="next_path" value="/ai-intake">
+    <label>Season name *<input name="season_name" value="{{ quick_values.get('season_name', '') }}" placeholder="For example FW26" maxlength="30" required><small>SS, FW, Resort, or any name you use.</small></label>
+    <label>First brand <span class="muted">optional</span><input name="brand_name" list="brand-catalog" value="{{ quick_values.get('brand_name', '') }}" placeholder="Or provide it in the AI note"><small>Choose now, or let AI extract it from the order information.</small></label>
+    <label>Customer name <span class="muted">optional</span><input name="customer_name" value="{{ quick_values.get('customer_name', '') }}" placeholder="Or provide it in the AI note"><small>You can leave this blank and dictate the customer later.</small></label>
+    <details class="quick-season-options"><summary>Optional business settings</summary><div><label>Customer code<input name="customer_code" value="{{ quick_values.get('customer_code', '') }}" placeholder="Created automatically"><small>Leave blank—the app makes a unique code from the name.</small></label><label>Destination country<input name="country_code" value="{{ quick_values.get('country_code', '') }}" placeholder="IT" maxlength="2"></label><label>Default markup %<input type="number" min="0" max="100" step="0.01" name="default_markup" value="{{ quick_values.get('default_markup', '35') }}"></label></div></details>
+    <button class="button primary large-button" type="submit">Create season and continue with AI →</button>
+  </form>
+</section>
+{% else %}
+{% if request.query_params.get('season_created') %}<section class="manual-success ai-season-success" role="status"><span>✓</span><div><strong>{{ request.query_params.get('season_created') }} is ready</strong><p>Describe, dictate, or attach the first order below.</p></div></section>{% endif %}
+<section class="panel ai-intake-compose">
+  <div class="panel-head">
+    <div><p class="eyebrow">New intake</p><h2>What would you like to add?</h2></div>
+    <span class="source-fact-note">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+      Calculations stay rule-based
+    </span>
+  </div>
+  <form action="/ai-intake/analyze" method="post" enctype="multipart/form-data" class="stack-form" id="multimodal-intake-form">
+    <div class="intake-context-row">
+      <label class="season-control"><span>Which season is this for?</span>
+        <select name="season_name" aria-label="Choose season" required>{% for season in seasons %}<option value="{{ season.name }}" {{ 'selected' if selected_season|default('') == season.name else '' }}>{{ season.name }}{{ ' · newest' if loop.first else '' }}</option>{% endfor %}</select>
+      </label>
+      <p>AI uses its brand and markup rules. <a href="/manual-entry#new-season">Create another season</a></p>
+    </div>
+
+    <div class="prompt-shell">
+      <label class="sr-only" for="intake-message">Order information</label>
+      <textarea id="intake-message" name="message" rows="8" placeholder="Describe the order… Include the customer, product, size, quantity, and price when known.">{{ message }}</textarea>
+      <div class="composer-toolbar">
+        <div class="composer-tools" aria-label="Add sources">
+          <label class="composer-action attachment-picker" title="Attach files">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.9 8.9a6 6 0 01-8.5-8.5l9.6-9.6a4 4 0 015.7 5.7l-9.6 9.6a2 2 0 01-2.8-2.8l8.9-8.9"/></svg>
+            <span>Attach</span>
+            <input id="intake-attachments" class="sr-only-input" type="file" name="attachments" multiple accept=".pdf,.xlsx,.xlsm,.csv,.tsv,.txt,.jpg,.jpeg,.png,.webp,.mp3,.wav,.ogg,.m4a,.mp4,.webm,audio/*,image/*,application/pdf">
+          </label>
+          <button class="composer-action" id="start-voice-note" type="button" title="Dictate order information">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3M9 21h6"/></svg>
+            <span>Dictate</span>
+          </button>
+          <button class="composer-action record-stop" id="stop-voice-note" type="button" disabled title="Stop speech-to-text">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+            <span>Stop</span>
+          </button>
+        </div>
+        <span class="voice-status" id="voice-status" role="status">Tap Dictate to speak into the text field</span>
+      </div>
+    </div>
+
+    <div class="attachment-summary">
+      <ul class="attachment-list" id="attachment-list"><li>No files attached</li></ul>
+      <small class="format-note">PDF, spreadsheets, text, images, audio, or video · 10 files · 25 MB total</small>
+    </div>
+    <div class="intake-submit-row">
+      <span>AI will turn the details into editable order drafts.</span>
+      <button class="button primary large-button intake-submit" type="submit">
+        Create drafts
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+{% if source_summary or follow_up_questions %}
+<section class="panel intake-source-summary">
+  <div class="panel-head"><div><p class="eyebrow">Extraction summary</p><h2>What AI understood</h2></div></div>
+  {% if source_summary %}<p>{{ source_summary }}</p>{% endif %}
+  {% if follow_up_questions %}<h3>Questions to resolve</h3><ul>{% for question in follow_up_questions %}<li>{{ question }}</li>{% endfor %}</ul>{% endif %}
+</section>
+{% endif %}
+
+{% if drafts %}
+<section class="wb-card ai-table-panel"><div class="panel-head"><div><p class="eyebrow">REVIEW BEFORE SAVING</p><h2>{{ drafts|length }} product rows from your source</h2><p>Images are read as evidence, not displayed as product photos. Yellow = in process · green = done · white = not completed. Confirm the source status; no payments are inferred.</p></div><a class="button" href="/excel">Excel files →</a></div>
+<div class="wb-table-scroll"><table class="wb-table ai-draft-table"><thead><tr><th>Row / source checks</th><th>Customer *</th><th>Brand / season</th><th>Article / product *</th><th>Color / size *</th><th>Qty *</th><th>Price / meaning *</th><th>More details</th><th>Save</th></tr></thead><tbody>
+{% for draft in drafts %}{% set facts=draft.facts %}{% set best=draft.matches[0] if draft.matches else None %}{% set fid='ai-row-' ~ loop.index %}
+<tr id="draft-{{ loop.index }}" class="ai-draft-row" data-worksheet-state="{{ facts.worksheet_status or 'pending' }}">
+<td><form id="{{ fid }}" action="/ai-intake/confirm" method="post" class="ai-review-form" data-draft-number="{{ loop.index }}"><input type="hidden" name="season_name" value="{{ selected_season }}"><input type="hidden" name="confirmation_token" value="{{ draft.confirmation_token }}"><input type="hidden" name="source_bundle_token" value="{{ draft.source_bundle_token }}"><textarea hidden name="source_text">{{ message }}{% if source_summary %}
+{{ source_summary }}{% endif %}</textarea></form><strong>Row {{ loop.index }}</strong>{% for issue in facts.missing_or_ambiguous %}<p class="wb-flag">{{ issue }}</p>{% else %}<small>Check against the source</small>{% endfor %}<button type="button" class="button tiny-button" data-fix-row>Check this row →</button><small>{{ facts.source_attachment_names|join(', ') }}</small><a href="/intake-sources/{{ draft.source_bundle_token }}" target="_blank" rel="noopener">Check saved source →</a></td>
+<td><label>Name<input form="{{ fid }}" name="customer_name" value="{{ facts.customer_name or '' }}" required data-customer-name></label><label>Code<input form="{{ fid }}" name="customer_code" value="{{ draft.suggested_code }}" readonly></label><small>Automatic from the first and last name.</small></td>
+<td><label>Brand<input form="{{ fid }}" name="brand_name" value="{{ facts.brand or '' }}"></label><label>Brand table<select form="{{ fid }}" name="order_id"><option value="">Create from brand name</option>{% for order in orders %}<option value="{{ order.id }}" {{ 'selected' if draft.suggested_order_id == order.id }}>{{ order.brand.name }} · {{ order.season.name }}</option>{% endfor %}</select></label><small>{{ selected_season }} · {{ draft.order_suggestion_reason }}</small></td>
+<td><label>Article / SKU<input form="{{ fid }}" name="article" value="{{ facts.article or (best.item.article if best else '') or '' }}"></label><label>Product<input form="{{ fid }}" name="product_name" value="{{ facts.product_name or (best.item.name if best else '') or '' }}" required></label></td>
+<td><label>Color<input form="{{ fid }}" name="color" value="{{ facts.color or (best.item.color if best else '') or '' }}"></label><label>Exact size<input form="{{ fid }}" name="size" value="{{ facts.explicit_size or '' }}" required placeholder="Confirm size"></label><small>Size is never guessed from a photo.</small></td>
+<td><label>Quantity<input form="{{ fid }}" type="number" min="1" name="quantity" value="{{ facts.quantity }}" required></label></td>
+<td><label>Stated price<input form="{{ fid }}" name="stated_price" value="{{ facts.stated_price or '' }}" required></label><label>Price means<select form="{{ fid }}" name="price_type" required><option value="">Confirm price type…</option><option value="wholesale" {{ 'selected' if facts.price_type == 'wholesale' }}>Wholesale / factory</option><option value="final" {{ 'selected' if facts.price_type == 'final' }}>Customer final</option></select></label></td>
+<td><details><summary>Contact, costs & delivery</summary><label>Phone<input form="{{ fid }}" name="customer_phone" value="{{ facts.customer_phone or '' }}"></label><label>Country<input form="{{ fid }}" name="country_code" maxlength="2" value="{{ facts.destination_country_code or '' }}"></label><label>New brand markup %<input form="{{ fid }}" type="number" min="0" max="100" step="0.01" name="new_brand_markup" value="35"></label><label>Selling unit override<input form="{{ fid }}" type="number" min="0" step="0.01" name="selling_unit_price" placeholder="Automatic"></label><small>Override requires stated price = wholesale.</small><label>Deliver by<input form="{{ fid }}" type="date" name="requested_delivery_date" value="{{ facts.requested_delivery_date or '' }}"></label><label>Logistics<input form="{{ fid }}" name="logistics_preference" value="{{ facts.logistics_preference or '' }}"></label><label>Requirements<textarea form="{{ fid }}" name="customer_requirements">{% if facts.height_cm %}Height: {{ facts.height_cm }} cm. {% endif %}{% if facts.weight_kg %}Weight: {{ facts.weight_kg }} kg. {% endif %}{{ facts.body_notes or '' }} {{ facts.contact_instructions or '' }}</textarea></label><label><input form="{{ fid }}" type="checkbox" name="contact_on_pdf_send" value="true" {{ 'checked' if facts.contact_instructions }}> Record contact reminder (does not send)</label></details></td>
+<td><label>Worksheet status<select form="{{ fid }}" name="worksheet_state" data-draft-state><option value="pending" {{ 'selected' if not facts.worksheet_status or facts.worksheet_status == 'pending' }}>Not completed</option><option value="process" {{ 'selected' if facts.worksheet_status == 'process' }}>In process</option><option value="done" {{ 'selected' if facts.worksheet_status == 'done' }}>Done</option></select></label><button form="{{ fid }}" class="button primary" type="button" data-save-here>Save row</button><span class="draft-save-status" role="status">Not saved</span></td>
+</tr>{% endfor %}</tbody></table></div>
+<div class="batch-save-bar"><div><strong>Confirm the rows, then save</strong><p>All required fields are checked first. If a server check fails, saved rows stay marked and only unsaved rows are retried.</p></div><div><button class="button primary" id="save-all-drafts" type="button">Save all reviewed rows</button><span id="batch-save-status" role="status"></span><a class="button" href="/worksheet">Open workbook →</a></div></div></section>
+{% endif %}
+
+<script>
+(() => {
+  const fileInput = document.getElementById('intake-attachments');
+  const fileList = document.getElementById('attachment-list');
+  const startButton = document.getElementById('start-voice-note');
+  const stopButton = document.getElementById('stop-voice-note');
+  const voiceStatus = document.getElementById('voice-status');
+  const messageInput = document.getElementById('intake-message');
+  const intakeForm = document.getElementById('multimodal-intake-form');
+  const intakeSubmit = intakeForm?.querySelector('button[type="submit"]');
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  let committedText = '';
+  let heardSpeech = false;
+  let voiceError = '';
+
+  function resetVoiceControls() {
+    if (startButton) {
+      startButton.disabled = false;
+      startButton.setAttribute('aria-pressed', 'false');
+    }
+    if (stopButton) stopButton.disabled = true;
+  }
+
+  function escapeHtml(value) {
+    const node = document.createElement('span');
+    node.textContent = value;
+    return node.innerHTML;
+  }
+  function renderFiles() {
+    if (!fileInput || !fileList) return;
+    const files = Array.from(fileInput.files);
+    fileList.innerHTML = files.length
+      ? files.map(file => `<li>${escapeHtml(file.name)} <span>${(file.size / 1024 / 1024).toFixed(1)} MB</span></li>`).join('')
+      : '<li>No files attached</li>';
+    const tooMany = files.length > 10;
+    const oversized = files.find(file => file.size > 12 * 1024 * 1024);
+    const totalTooLarge = files.reduce((sum, file) => sum + file.size, 0) > 25 * 1024 * 1024;
+    const problem = tooMany ? 'Choose no more than 10 files' : oversized ? `${oversized.name} is larger than 12 MB` : totalTooLarge ? 'Selected files exceed 25 MB total' : '';
+    fileInput.setCustomValidity(problem);
+    if (problem) fileList.insertAdjacentHTML('beforeend', `<li class="attachment-error">${escapeHtml(problem)}</li>`);
+    if (intakeSubmit) intakeSubmit.disabled = Boolean(problem);
+  }
+
+  fileInput?.addEventListener('change', renderFiles);
+  startButton?.addEventListener('click', () => {
+    if (!window.isSecureContext) {
+      voiceStatus.textContent = 'Dictation needs the secure https website link';
+      return;
+    }
+    if (!SpeechRecognition) {
+      voiceStatus.textContent = 'Dictation is unavailable here — try Safari or Chrome';
+      return;
+    }
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = !/iPhone|iPad|iPod/i.test(navigator.userAgent);
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || document.documentElement.lang || 'en-US';
+      committedText = messageInput?.value.trim() || '';
+      heardSpeech = false;
+      voiceError = '';
+      recognition.onstart = () => {
+        startButton.disabled = true;
+        stopButton.disabled = false;
+        startButton.setAttribute('aria-pressed', 'true');
+        voiceStatus.textContent = 'Listening… speak now';
+      };
+      recognition.onresult = event => {
+        let finalText = '';
+        let interimText = '';
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const transcript = event.results[index][0].transcript;
+          if (event.results[index].isFinal) finalText += transcript;
+          else interimText += transcript;
+        }
+        if (finalText.trim()) {
+          heardSpeech = true;
+          committedText = [committedText, finalText.trim()].filter(Boolean).join(' ');
+        }
+        if (interimText.trim()) heardSpeech = true;
+        if (messageInput) {
+          messageInput.value = [committedText, interimText.trim()].filter(Boolean).join(' ');
+          messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      };
+      recognition.onend = () => {
+        resetVoiceControls();
+        if (!voiceError) voiceStatus.textContent = heardSpeech ? 'Speech added — you can edit it above' : 'Tap Dictate and speak after “Listening” appears';
+        recognition = null;
+      };
+      recognition.onerror = event => {
+        const messages = {
+          'not-allowed': 'Allow microphone access in your browser settings, then try again',
+          'audio-capture': 'No microphone was found on this device',
+          'no-speech': 'No speech was heard — tap Dictate and try again',
+          'network': 'Dictation needs an internet connection — please try again',
+          'aborted': 'Dictation stopped'
+        };
+        voiceError = messages[event.error] || 'Dictation stopped — please try again';
+        voiceStatus.textContent = voiceError;
+        resetVoiceControls();
+      };
+      recognition.start();
+    } catch {
+      resetVoiceControls();
+      voiceStatus.textContent = 'Dictation could not start — close other microphone apps and retry';
+    }
+  });
+  stopButton?.addEventListener('click', () => {
+    recognition?.stop();
+  });
+
+  const draftForms = Array.from(document.querySelectorAll('.ai-review-form'));
+  const batchButton = document.getElementById('save-all-drafts');
+  const batchStatus = document.getElementById('batch-save-status');
+
+  function customerInitials(value) {
+    const words = value.trim().match(/[\p{L}\p{N}]+/gu) || [];
+    if (words.length >= 2) return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
+    if (words.length === 1) return Array.from(words[0]).slice(0, 2).join('').toUpperCase();
+    return 'CUST';
+  }
+
+  function unsavedForms() {
+    return draftForms.filter(form => form.dataset.saved !== 'true');
+  }
+  function updateReviewedCount() {
+    if (!batchStatus) return;
+    const remaining = unsavedForms().length;
+    const saved = draftForms.filter(form => form.dataset.saved === 'true').length;
+    batchStatus.textContent = remaining ? `${remaining} ${remaining === 1 ? 'draft' : 'drafts'} ready${saved ? ` · ${saved} saved` : ''}` : `${saved} saved`;
+  }
+  async function saveDraft(form) {
+    if (form.dataset.saved === 'true') return true;
+    if (!form.reportValidity()) return false;
+    const row = form.closest('tr');
+    const status = row.querySelector('.draft-save-status');
+    const buttons = row.querySelectorAll('button');
+    buttons.forEach(button => button.disabled = true);
+    status.textContent = 'Saving and recalculating…';
+    try {
+      const data = new FormData(form);
+      data.set('save_mode', 'batch');
+      const response = await fetch(form.action, { method: 'POST', body: data, headers: { 'Accept': 'application/json' } });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) { const detail = Array.isArray(payload.detail) ? payload.detail.map(issue => `${issue.loc?.slice(-1)[0] || 'Field'}: ${issue.msg}`).join('; ') : payload.detail; throw new Error(detail || 'The row could not be saved. Check the fields and retry.'); }
+      form.dataset.saved = 'true';
+      row.classList.add('draft-saved');
+      Array.from(form.elements).forEach(control => control.disabled = true);
+      status.innerHTML = `Saved · <a href="${payload.redirect}">open saved product</a>`;
+      return true;
+    } catch (error) {
+      status.textContent = error.message || 'The row could not be saved';
+      buttons.forEach(button => button.disabled = false);
+      return false;
+    } finally {
+      updateReviewedCount();
+    }
+  }
+  draftForms.forEach(form => {
+    const row = form.closest('tr');
+    row.querySelector('[data-draft-state]')?.addEventListener('change',event => row.dataset.worksheetState=event.target.value);
+    const customerName = row.querySelector('[data-customer-name]');
+    const customerCode = row.querySelector('input[name="customer_code"]');
+    customerName?.addEventListener('input', () => { if (customerCode) customerCode.value = customerInitials(customerName.value); });
+    row.querySelector('[data-save-here]')?.addEventListener('click', () => saveDraft(form));
+    form.addEventListener('submit', event => { event.preventDefault(); saveDraft(form); });
+    row.querySelector('[data-fix-row]')?.addEventListener('click', () => { if(form.reportValidity()) row.querySelector('[name="product_name"]').focus(); });
+  });
+  batchButton?.addEventListener('click', async () => {
+    const selected = unsavedForms();
+    if (!selected.length) {
+      batchStatus.textContent = 'All drafts are already saved';
+      return;
+    }
+    for (const form of selected) { if (!form.reportValidity()) { batchStatus.textContent = `Complete row ${form.dataset.draftNumber} before saving`; return; } }
+    batchButton.disabled = true;
+    for (const form of selected) {
+      const saved = await saveDraft(form);
+      if (!saved) {
+        batchStatus.textContent = `Stopped at draft ${form.dataset.draftNumber}; correct the highlighted field`;
+        batchButton.disabled = false;
+        return;
+      }
+    }
+    batchStatus.textContent = 'All drafts were created and totals recalculated';
+    batchButton.disabled = false;
+  });
+  updateReviewedCount();
+})();
+</script>
+{% include "_brand_datalist.html" %}
+{% endblock %}

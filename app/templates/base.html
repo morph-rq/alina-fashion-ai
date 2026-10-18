@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20260827">
+  <link rel="stylesheet" href="/static/refinement.css?v=20260827-2">
+  <link rel="stylesheet" href="/static/workbook.css?v=20260831">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brandmark" href="/" aria-label="Fashion Order Automation dashboard">
+        <span class="monogram">FA</span>
+        <span><strong>ALINA / FASHION</strong><small>Order workbook · Local preview</small></span>
+      </a>
+      <div class="topbar-tools"><button class="global-search-toggle" type="button" aria-controls="global-search-panel" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg><span>Search</span><kbd>Ctrl K</kbd></button><button class="ai-help-toggle" type="button" aria-controls="ai-help-drawer" aria-expanded="false"><span class="ai-mini">AI</span><span>Help</span></button></div>
+      <button class="mobile-menu-toggle" type="button" aria-controls="main-navigation" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <span>Menu</span>
+      </button>
+      <nav id="main-navigation" aria-label="Main navigation">
+        <div class="mobile-nav-head"><div><span class="monogram">FA</span><strong>Menu</strong></div><button class="mobile-menu-close" type="button" aria-label="Close menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+        <div class="nav-primary" aria-label="Everyday tasks">
+          <a class="{{ 'active' if request.url.path == '/' else '' }}" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5L12 4l8 6.5V20H4zM9 20v-6h6v6"/></svg><span>Home</span></a>
+          <a class="{{ 'active' if request.url.path.startswith('/operations') else '' }}" href="/operations"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM8 9h8M8 13h5"/></svg><span>To-do</span></a>
+          <a class="nav-add {{ 'active' if request.url.path == '/manual-entry' else '' }}" href="/manual-entry"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add order</span></a>
+          <a class="{{ 'active' if request.url.path.startswith('/orders') or request.url.path.startswith('/brands') else '' }}" href="/orders"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg><span>Orders</span></a>
+          <a class="{{ 'active' if request.url.path.startswith('/customers') else '' }}" href="/customers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5.5 20c.7-4 2.8-6 6.5-6s5.8 2 6.5 6"/></svg><span>Customers</span></a>
+        </div>
+        <details class="nav-more {{ 'current' if request.url.path.startswith(('/ai-intake','/product-images','/ready-batches','/shipments','/payments','/validation','/reports','/library','/import','/rules','/audit')) else '' }}">
+          <summary><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>More tools</span></summary>
+          <div class="nav-more-links">
+            <span class="nav-section-label">Orders & delivery</span>
+            <a href="/worksheet">Color-coded workbook</a><a href="/excel">Excel files</a>
+            <a href="/groups">Distributor & shipment groups</a>
+            <a href="/credits">Seller prepayments & credit</a>
+            <a href="/storage">Storage & backups</a>
+            <a class="{{ 'active' if request.url.path.startswith('/ai-intake') else '' }}" href="/ai-intake">AI to table</a>
+            <a class="{{ 'active' if request.url.path.startswith('/ready-batches') else '' }}" href="/ready-batches">Ready goods</a>
+            <a class="{{ 'active' if request.url.path.startswith('/shipments') else '' }}" href="/shipments">Shipments</a>
+            <span class="nav-section-label">Money & documents</span>
+            <a class="{{ 'active' if request.url.path.startswith('/payments') else '' }}" href="/payments">Payments</a>
+            <a class="{{ 'active' if request.url.path.startswith('/reports') else '' }}" href="/reports">Customer PDFs</a>
+            <a class="{{ 'active' if request.url.path.startswith('/library') else '' }}" href="/library">Business library</a>
+            <span class="nav-section-label">Setup</span>
+            <a class="{{ 'active' if request.url.path.startswith('/validation') else '' }}" href="/validation">Issues & suggestions</a>
+            <a class="{{ 'active' if request.url.path.startswith('/import') else '' }}" href="/excel">Excel download & upload</a>
+            <a class="{{ 'active' if request.url.path.startswith('/rules') else '' }}" href="/rules">Business rules</a>
+          </div>
+        </details>
+      </nav>
+    </div>
+  </header>
+  <button class="mobile-nav-scrim" type="button" aria-label="Close menu" tabindex="-1"></button>
+  <aside class="global-search-panel" id="global-search-panel" aria-label="Search everything" aria-hidden="true"><div class="global-search-box"><div class="global-search-input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg><label class="sr-only" for="global-search-query">Search customers, products, brands, and files</label><input id="global-search-query" type="search" autocomplete="off" placeholder="Search a customer, product, SKU, brand, file…"><button class="global-search-close" type="button" aria-label="Close search">×</button></div><div class="global-search-results" id="global-search-results"><div class="search-welcome"><strong>Find anything quickly</strong><span>Try a customer name, phone, product article, brand, season, or file.</span></div></div><div class="global-search-foot"><span>Type at least 2 characters</span><a href="/exports/business.xlsx">Download all data as Excel ↓</a></div></div></aside>
+  <button class="global-search-scrim" type="button" aria-label="Close search"></button>
+  <aside class="ai-help-drawer" id="ai-help-drawer" aria-label="AI Help" aria-hidden="true"><div class="ai-help-head"><div><span class="ai-spark">AI</span><div><strong>Business helper</strong><small>Ask in everyday language</small></div></div><button class="ai-help-close" type="button" aria-label="Close AI Help">×</button></div><div class="ai-help-messages" id="ai-help-messages"><div class="assistant-bubble">Hi! Ask me where to find something, how the app works, what your projected profit is, or ask me to propose a formula change.</div></div><div class="ai-help-prompts"><button type="button">What should I do next?</button><button type="button">What is my projected profit?</button><button type="button">How do I add an order?</button></div><form class="ai-help-form" id="ai-help-form"><label class="sr-only" for="ai-help-question">Ask AI Help</label><textarea id="ai-help-question" rows="2" placeholder="Ask anything about the business…" required></textarea><button type="submit" aria-label="Send question">→</button></form><small class="ai-help-disclaimer">Financial changes are proposals until you explicitly confirm them.</small></aside>
+  <button class="ai-help-scrim" type="button" aria-label="Close AI Help"></button>
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="mobile-quick-nav" aria-label="Quick actions">
+    <a class="{{ 'active' if request.url.path == '/' else '' }}" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5L12 4l8 6.5V20H4zM9 20v-6h6v6"/></svg><span>Home</span></a>
+    <a class="{{ 'active' if request.url.path.startswith('/operations') else '' }}" href="/operations"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM8 9h8M8 13h5"/></svg><span>To-do</span></a>
+    <a class="quick-add" href="/manual-entry" aria-label="Add an order"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add</span></a>
+    <a class="{{ 'active' if request.url.path.startswith('/customers') else '' }}" href="/customers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5.5 20c.7-4 2.8-6 6.5-6s5.8 2 6.5 6"/></svg><span>Customers</span></a>
+    <button type="button" class="quick-menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg><span>Menu</span></button>
+  </nav>
+  <footer><span>One source of truth for every order.</span><a href="/audit">Audit history</a></footer>
+  <script>
+  (() => {
+    const body = document.body;
+    const toggle = document.querySelector('.mobile-menu-toggle');
+    const close = document.querySelector('.mobile-menu-close');
+    const scrim = document.querySelector('.mobile-nav-scrim');
+    const nav = document.getElementById('main-navigation');
+    const setOpen = (open) => {
+      body.classList.toggle('mobile-nav-open', open);
+      toggle?.setAttribute('aria-expanded', String(open));
+      if (open) close?.focus();
+      else if (document.activeElement === close) toggle?.focus();
+    };
+    toggle?.addEventListener('click', () => setOpen(!body.classList.contains('mobile-nav-open')));
+    close?.addEventListener('click', () => setOpen(false));
+    scrim?.addEventListener('click', () => setOpen(false));
+    nav?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => setOpen(false)));
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') setOpen(false); });
+    window.addEventListener('resize', () => { if (window.innerWidth > 700) setOpen(false); });
+    document.querySelector('.quick-menu')?.addEventListener('click', () => setOpen(true));
+  })();
+  </script>
+  <script>
+  (()=>{const panel=document.getElementById('global-search-panel'),toggle=document.querySelector('.global-search-toggle'),close=document.querySelector('.global-search-close'),scrim=document.querySelector('.global-search-scrim'),input=document.getElementById('global-search-query'),results=document.getElementById('global-search-results');let timer,controller;
+    const setOpen=open=>{document.body.classList.toggle('global-search-open',open);panel?.setAttribute('aria-hidden',String(!open));toggle?.setAttribute('aria-expanded',String(open));if(open){setTimeout(()=>input?.focus(),40);}else{controller?.abort();}};
+    toggle?.addEventListener('click',()=>setOpen(true));close?.addEventListener('click',()=>setOpen(false));scrim?.addEventListener('click',()=>setOpen(false));document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();setOpen(true);}else if(event.key==='Escape'&&document.body.classList.contains('global-search-open'))setOpen(false);});
+    const message=(title,detail='')=>{results.replaceChildren();const box=document.createElement('div');box.className='search-welcome';const strong=document.createElement('strong');strong.textContent=title;const span=document.createElement('span');span.textContent=detail;box.append(strong,span);results.append(box);};
+    const run=async query=>{controller?.abort();controller=new AbortController();message('Searching…');try{const response=await fetch(`/api/search?q=${encodeURIComponent(query)}`,{signal:controller.signal});const data=await response.json();results.replaceChildren();if(!data.results?.length){message('Nothing found','Try a name, phone number, SKU, brand, season, or file name.');return;}data.results.forEach(row=>{const link=document.createElement('a');link.href=row.url;const badge=document.createElement('span');badge.className='search-result-type';badge.textContent=row.type;const text=document.createElement('span');const title=document.createElement('strong');title.textContent=row.title;const small=document.createElement('small');small.textContent=row.subtitle||'';text.append(title,small);const arrow=document.createElement('i');arrow.textContent='→';link.append(badge,text,arrow);results.append(link);});}catch(error){if(error.name!=='AbortError')message('Search is temporarily unavailable','Please try again.');}};
+    input?.addEventListener('input',()=>{clearTimeout(timer);const query=input.value.trim();if(query.length<2){message('Find anything quickly','Try a customer name, phone, product article, brand, season, or file.');return;}timer=setTimeout(()=>run(query),180);});
+  })();
+  </script>
+  <script>
+  (() => {
+    const drawer=document.getElementById('ai-help-drawer'), toggle=document.querySelector('.ai-help-toggle'), close=document.querySelector('.ai-help-close'), scrim=document.querySelector('.ai-help-scrim'), form=document.getElementById('ai-help-form'), input=document.getElementById('ai-help-question'), messages=document.getElementById('ai-help-messages');
+    const setHelp=open=>{document.body.classList.toggle('ai-help-open',open);drawer?.setAttribute('aria-hidden',String(!open));toggle?.setAttribute('aria-expanded',String(open));if(open)input?.focus();};
+    toggle?.addEventListener('click',()=>setHelp(true));close?.addEventListener('click',()=>setHelp(false));scrim?.addEventListener('click',()=>setHelp(false));
+    const bubble=(text,kind='assistant')=>{const node=document.createElement('div');node.className=`${kind}-bubble`;node.textContent=text;messages.append(node);messages.scrollTop=messages.scrollHeight;return node;};
+    async function ask(question){bubble(question,'user');const waiting=bubble('Thinking…');try{const response=await fetch('/api/assistant/help',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question})});const data=await response.json();waiting.textContent=data.answer||data.detail||'I could not answer that.';if(data.profit&&/profit|money|earn|margin/i.test(question)){const p=document.createElement('div');p.className='assistant-profit';p.innerHTML=`<span>Projected profit</span><strong>${Number(data.profit.projected_profit).toLocaleString()} {{ currency }}</strong><small>${data.profit.explanation}</small>`;messages.append(p);}if(data.suggested_page){const a=document.createElement('a');a.className='assistant-action';a.href=data.suggested_page;a.textContent=(data.suggested_page_label||'Open page')+' →';messages.append(a);}if(data.download_url){const a=document.createElement('a');a.className='assistant-action download-action';a.href=data.download_url;a.download='';a.textContent=(data.download_label||'Download Excel file')+' ↓';messages.append(a);}if(data.rule_proposal){const proposal=data.rule_proposal, box=document.createElement('form');box.className='assistant-proposal';box.method='post';box.action='/assistant/apply-rule';const fields=['rule_id','markup_percentage','initial_percentage','ready_percentage','transport_percentage','special_cost','explanation'];fields.forEach(name=>{if(proposal[name]!==null&&proposal[name]!==undefined){const hidden=document.createElement('input');hidden.type='hidden';hidden.name=name;hidden.value=proposal[name];box.append(hidden);}});const confirm=document.createElement('input');confirm.type='hidden';confirm.name='confirmation';confirm.value='APPLY_AI_RULE_PROPOSAL';box.append(confirm);const title=document.createElement('strong');title.textContent='Review formula proposal';const detail=document.createElement('small');detail.textContent=proposal.explanation;const submit=document.createElement('button');submit.className='button primary';submit.textContent='Apply this proposal';box.append(title,detail,submit);messages.append(box);}messages.scrollTop=messages.scrollHeight;}catch{waiting.textContent='AI Help is temporarily unavailable. Try again shortly.';}}
+    form?.addEventListener('submit',event=>{event.preventDefault();const q=input.value.trim();if(!q)return;input.value='';ask(q);});document.querySelectorAll('.ai-help-prompts button').forEach(button=>button.addEventListener('click',()=>ask(button.textContent)));
+  })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

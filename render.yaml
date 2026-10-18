@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: app
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FASHION_DATABASE_URL
+        value: sqlite:////opt/render/project/src/data/fashion_orders.db
+      - key: FASHION_APP_USERNAME
+        value: alina
+      - key: FASHION_APP_PASSWORD
+        sync: false
+      - key: FASHION_AI_API_KEY
+        sync: false
+      - key: FASHION_SEARXNG_URL
+        value: ""
+    disk:
+      name: fashion-business-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

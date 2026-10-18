@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+node_modules
+__pycache__
+.pytest_cache
+tmp
+data
+backups
+output
+outputs
+phone-preview
+*.db
+*.pdf
+*.zip
+*.xlsx

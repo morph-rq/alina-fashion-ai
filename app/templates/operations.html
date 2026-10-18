@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head friendly-head"><div><p class="eyebrow">Your to-do list</p><h1>What needs your attention</h1><p>The app handles the calculations. You only need to work through the cards below, one at a time.</p></div><a class="button" href="/validation">Check for problems</a></section>
+{% if tasks %}<section class="task-grid">{% for task in tasks %}<article class="task-card {{ task.severity }}"><span>{{ 'Do this first' if task.severity == 'error' else ('Reminder' if task.severity == 'warning' else 'Next step') }}</span><h2>{{ task.title }}</h2><p>{{ task.detail }}</p><a class="button {{ 'primary' if task.severity == 'error' else '' }}" href="{{ task.action_url }}">{{ task.action_label }} →</a></article>{% endfor %}</section>{% else %}<section class="empty all-clear-empty"><span>✓</span><h2>You are all caught up</h2><p>There is nothing that needs your attention right now.</p><a class="button primary" href="/">Back to home</a></section>{% endif %}
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Add order manually - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="page-head manual-page-head">
+  <div><p class="eyebrow">No AI required</p><h1>Add an order manually</h1><p>Choose an existing season and brand below, or create a new one in less than a minute.</p></div>
+  <a class="button" href="/ai-intake">Use AI intake instead</a>
+</section>
+
+<section class="manual-progress large" aria-label="Manual entry steps"><span class="active">1 <small>Choose or create</small></span><span>2 <small>Add product</small></span><span>3 <small>Review row</small></span></section>
+
+<details class="quick-season-setup" id="new-season" {{ 'open' if not orders or quick_error else '' }}>
+  <summary><span class="quick-season-icon">+</span><span><strong>Create a new season</strong><small>Use this when starting SS, FW, or another buying season</small></span><i>⌄</i></summary>
+  <div class="quick-season-body">
+    {% if quick_error %}<div class="quick-error" role="alert"><strong>Please check this:</strong> {{ quick_error }}</div>{% endif %}
+    <div class="quick-season-intro"><p class="eyebrow">New workspace</p><h2>Tell us the basics</h2><p>This creates the season, its first brand table, and its first customer. You will add the first product on the next screen.</p></div>
+    <form class="quick-season-form" action="/seasons/quick-create" method="post">
+      <label>Season name *<input name="season_name" value="{{ quick_values.get('season_name', '') }}" placeholder="For example FW26" maxlength="30" required><small>Any new name is allowed: FW26, SS27, Resort 27…</small></label>
+      <label>First brand *<input name="brand_name" list="brand-catalog" value="{{ quick_values.get('brand_name', '') }}" placeholder="Search {{ brand_suggestions|length }} popular brands…" required><small>Choose a suggestion or type any other brand.</small></label>
+      <label>Customer name *<input name="customer_name" value="{{ quick_values.get('customer_name', '') }}" placeholder="Full name" required></label>
+      <details class="quick-season-options"><summary>Optional business settings</summary><div><label>Customer code<input name="customer_code" value="{{ quick_values.get('customer_code', '') }}" placeholder="Created automatically"><small>Leave blank—the app makes a unique code from the name.</small></label><label>Destination country<input name="country_code" value="{{ quick_values.get('country_code', '') }}" placeholder="IT" maxlength="2"></label><label>Default markup %<input type="number" min="0" max="100" step="0.01" name="default_markup" value="{{ quick_values.get('default_markup', '35') }}"></label></div></details>
+      <button class="button primary large-button" type="submit">Create season and add first product →</button>
+    </form>
+    <p class="quick-season-note">Need many brands or products at once? <a href="/seasons/new">Use the advanced bulk setup</a> or <a href="/import">import a spreadsheet</a>.</p>
+  </div>
+</details>
+
+<section class="panel manual-brand-panel">
+  <div class="panel-head"><div><p class="eyebrow">Existing seasons</p><h2>Or choose a brand you already use</h2><p class="manual-intro">Tap a brand to add another product to it.</p></div></div>
+  {% if orders %}
+  <div class="quick-search compact-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg><input id="brand-search" type="search" placeholder="Type a brand name…" autocomplete="off" aria-label="Search brands"></div>
+  <div class="manual-brand-grid" id="brand-list">
+    {% for order in orders %}
+    <a class="manual-brand-card" data-search="{{ order.brand.name|lower }} {{ order.season.name|lower }}" href="/orders/{{ order.id }}#manual-entry"><span class="status">{{ order.season.name }}</span><h3>{{ order.brand.name }}</h3><p>{{ order.items|length }} existing product {{ 'row' if order.items|length == 1 else 'rows' }}</p><strong>Choose this brand →</strong></a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty simple-brand-empty"><h2>No seasons yet</h2><p>Use “Create a new season” above to begin.</p></div>
+  {% endif %}
+</section>
+
+<section class="manual-help-grid">
+  <article><span>Required from you</span><strong>Customer, product, quantity, and wholesale price</strong></article>
+  <article><span>Calculated for you</span><strong>Markup, final price, order totals, and balances</strong></article>
+  <article><span>Optional later</span><strong>Image, readiness, shipment, and factory notes</strong></article>
+</section>
+{% include "_brand_datalist.html" %}
+{% endblock %}
+{% block scripts %}<script>(()=>{const input=document.getElementById('brand-search');const cards=[...document.querySelectorAll('#brand-list .manual-brand-card')];input?.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();cards.forEach(card=>card.hidden=!!q&&!card.dataset.search.includes(q));});})();</script>{% endblock %}

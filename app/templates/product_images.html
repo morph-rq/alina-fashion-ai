@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Product images - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div><p class="eyebrow">Managed media</p><h1>Product image library</h1><p>Search every attached image by product name, article/SKU, brand, color, customer, or season.</p></div>
+  <a class="button primary" href="/seasons/new">Create seasonal table</a>
+</section>
+
+<section class="panel image-library-search">
+  <form method="get" action="/product-images">
+    <label for="image-search">Find an image</label>
+    <div><input id="image-search" type="search" name="q" value="{{ q }}" placeholder="Try FAQ9434, coat, navy, Loro Piana, AA…"><button class="button primary" type="submit">Search</button>{% if q %}<a class="button" href="/product-images">Clear</a>{% endif %}</div>
+  </form>
+  <span>{{ items|length }} image{{ '' if items|length == 1 else 's' }}</span>
+</section>
+
+{% if items %}
+<section class="product-image-library">
+  {% for item in items %}
+  <article class="product-image-card">
+    <a class="library-image" href="/orders/{{ item.order_id }}"><img src="{{ item.image_path|media }}" alt="{{ item.name or item.article or 'Product image' }}"></a>
+    <div>
+      <p class="eyebrow">{{ item.order.season.name }} · {{ item.order.brand.name }}</p>
+      <h2>{{ item.name or 'Unnamed product' }}</h2>
+      <strong>{{ item.article or 'No article/SKU' }}</strong>
+      <p>{{ item.color or 'No color' }}{% if item.size %} · Size {{ item.size }}{% endif %}{% if item.customer %} · {{ item.customer.code }}{% endif %}</p>
+      <small>Uploaded as {{ item.image_source_filename or 'image' }} · {{ (item.image_match_method or 'manual')|replace('_', ' ') }}</small>
+      <a class="text-link" href="/orders/{{ item.order_id }}">Open brand table</a>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty"><h2>No product images found</h2><p>{% if q %}Try another product name, SKU, brand, customer, or season.{% else %}Images uploaded during seasonal-table creation or from brand tables will appear here.{% endif %}</p>{% if q %}<a class="button" href="/product-images">Show all images</a>{% endif %}</section>
+{% endif %}
+{% endblock %}

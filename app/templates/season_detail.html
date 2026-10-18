@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ data.season.name }} seasonal table - {{ app_name }}{% endblock %}
+{% block content %}
+{% if created %}<section class="notice"><div><strong>{{ data.season.name }} was created successfully.</strong><span>Every saved amount below is derived from the new source rows.</span></div><a class="button" href="/validation">Run SYSTEM CHECK</a></section>{% endif %}
+<section class="hero slim">
+  <div><p class="eyebrow">Season workspace</p><h1>{{ data.season.name }} seasonal table</h1><p>Master overview generated from product rows, Brand + Season rules, Ready batches, shipments, and payments.</p></div>
+  <div class="inline-actions"><a class="button" href="/orders">All orders</a><a class="button primary" href="/seasons/new">Create another season</a></div>
+</section>
+<section class="kpis">
+  <article><span>Total order value</span><strong>{{ data.totals.final|money }}</strong><small>{{ currency }}</small></article>
+  <article><span>Initial prepayment</span><strong>{{ data.totals.required_prepayment|money }}</strong><small>automatic</small></article>
+  <article><span>Ready goods</span><strong>{{ data.totals.ready|money }}</strong><small>item-level</small></article>
+  <article><span>Saldo</span><strong>{{ data.totals.saldo|money }}</strong><small>unfulfilled</small></article>
+  <article class="accent"><span>Amount payable</span><strong>{{ data.account.outstanding|money }}</strong><small>Paid {{ data.account.total_paid|money }}</small></article>
+</section>
+<section class="panel">
+  <div class="panel-head"><div><p class="eyebrow">Master table</p><h2>{{ data.season.name }} by brand</h2></div><span class="muted">Ready and Sped columns appear automatically</span></div>
+  <div class="table-scroll"><table class="data-table dashboard-table"><thead><tr><th>Brand</th><th>Order total</th><th>Initial</th><th>Ready Goods</th>{% for shipment in data.shipments %}<th>{{ shipment.name }}</th>{% endfor %}<th>Saldo</th><th>Factory readiness</th></tr></thead><tbody>{% for row in data.orders %}<tr><th><a href="/orders/{{ row.order.id }}">{{ row.order.brand.name }}</a></th><td>{{ row.amounts.final|money }}</td><td>{{ row.amounts.required_prepayment|money }}</td><td>{{ row.amounts.ready|money }}</td>{% for shipment in data.shipments %}<td>{{ row.amounts.shipments.get(shipment.id, 0)|money }}</td>{% endfor %}<td>{{ row.amounts.saldo|money }}</td><td>{{ row.order.factory_ready_note or '-' }}</td></tr>{% endfor %}</tbody><tfoot><tr><th>Total</th><td>{{ data.totals.final|money }}</td><td>{{ data.totals.required_prepayment|money }}</td><td>{{ data.totals.ready|money }}</td>{% for shipment in data.shipments %}<td>{{ data.totals.shipments.get(shipment.id, 0)|money }}</td>{% endfor %}<td>{{ data.totals.saldo|money }}</td><td></td></tr></tfoot></table></div>
+</section>
+<section class="two-col">
+  <article class="panel compact"><p class="eyebrow">Customer money</p><h2>Collection position</h2><dl class="totals-list"><div><dt>Current charges</dt><dd>{{ data.account.total_charged|money }}</dd></div><div><dt>Received</dt><dd>{{ data.account.total_paid|money }}</dd></div><div class="strong"><dt>Outstanding</dt><dd>{{ data.account.outstanding|money }}</dd></div></dl></article>
+  <article class="panel compact"><p class="eyebrow">Factory money</p><h2>Factory liability</h2><dl class="totals-list"><div><dt>Required</dt><dd>{{ data.factory_required|money }}</dd></div><div><dt>Paid</dt><dd>{{ data.factory_paid|money }}</dd></div><div class="strong"><dt>Remaining</dt><dd>{{ data.factory_account.outstanding|money }}</dd></div></dl></article>
+</section>
+{% endblock %}

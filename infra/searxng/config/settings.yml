@@ -1,0 +1,17 @@
+use_default_settings: true
+
+general:
+  instance_name: "app Product Search"
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "fc85321acf41a7d09fbbf8d230b256a3d678a62bca1f3e121d6b792674a1ee28"
+  limiter: false
+  image_proxy: true

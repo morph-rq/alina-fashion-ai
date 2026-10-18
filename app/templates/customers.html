@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Customers - {{ app_name }}{% endblock %}
+{% block content %}
+<section class="page-head friendly-head"><div><p class="eyebrow">Customer accounts</p><h1>Find a customer</h1><p>Search by name or code. Every account below is calculated from the {{ season.name if season else 'selected' }} master table.</p></div><form method="get" class="season-picker"><label>Season<select name="season" onchange="this.form.submit()">{% for option in seasons %}<option value="{{ option.name }}" {{ 'selected' if season and option.id == season.id else '' }}>{{ option.name }}</option>{% endfor %}</select></label></form></section>
+<section class="quick-search customer-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg><input id="customer-search" type="search" placeholder="Type a customer name or code…" autocomplete="off" aria-label="Search customers"><span id="customer-count">{{ statements|length }} customers</span></section>
+<section class="customer-simple-grid" id="customer-list">
+{% for statement in statements %}
+  <article class="customer-simple-card" data-search="{{ statement.customer.code|lower }} {{ (statement.customer.name or '')|lower }}">
+    <a class="customer-card-main" href="/customers/{{ statement.customer.id }}?season={{ season.name }}">
+      <span class="customer-avatar">{{ (statement.customer.name or statement.customer.code)[:1]|upper }}</span>
+      <span class="customer-identity"><strong>{{ statement.customer.name or 'Customer ' ~ statement.customer.code }}</strong><small>Code {{ statement.customer.code }} · {{ statement.items|length }} products</small></span>
+      <span class="customer-balance {{ 'paid' if statement.account.outstanding == 0 else '' }}"><small>{{ 'Paid in full' if statement.account.outstanding == 0 else 'Still to pay' }}</small><strong>{{ statement.account.outstanding|money }}</strong></span>
+    </a>
+    <div class="customer-card-actions"><a href="/customers/{{ statement.customer.id }}?season={{ season.name }}">Open account</a><a class="pdf-action" href="/reports/customers/{{ statement.customer.id }}/pdf?season={{ season.name }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v5h5M10 13h5M10 17h5"/></svg>Download PDF</a></div>
+  </article>
+{% endfor %}
+</section>
+<section class="empty search-empty" id="customer-empty" hidden><h2>No customer found</h2><p>Try a different spelling or customer code.</p></section>
+{% endblock %}
+{% block scripts %}<script>(()=>{const input=document.getElementById('customer-search');const cards=[...document.querySelectorAll('#customer-list .customer-simple-card')];const count=document.getElementById('customer-count');const empty=document.getElementById('customer-empty');input?.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();let shown=0;cards.forEach(card=>{const match=!q||card.dataset.search.includes(q);card.hidden=!match;if(match)shown++;});count.textContent=`${shown} ${shown===1?'customer':'customers'}`;empty.hidden=shown!==0;});})();</script>{% endblock %}

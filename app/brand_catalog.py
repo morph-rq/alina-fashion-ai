@@ -1,0 +1,41 @@
+"""Searchable starter catalogue for manual brand entry.
+
+The list is deliberately broad and never restricts free-text entry.
+"""
+
+BRAND_SUGGESTIONS = (
+    "A.P.C.", "A.W.A.K.E. Mode", "Acne Studios", "Adidas", "Adidas Originals",
+    "Aeyde", "AGOLDE", "Agua by Agua Bendita", "Aimé Leon Dore", "Aje", "Alaïa",
+    "Alexander McQueen", "Alexander Wang", "Alexandre Vauthier", "Alex Perry", "AllSaints",
+    "Altuzarra", "Ami Paris", "Amina Muaddi", "Amiri", "Anine Bing", "Ann Demeulemeester",
+    "Anna October", "Anna Sui", "Aquazzura", "Arc'teryx", "Arket", "Aspesi", "Audemars Piguet",
+    "Auralee", "Axel Arigato", "Balenciaga", "Balmain", "Barbour", "Ba&sh", "Bec + Bridge",
+    "Birkenstock", "Blazé Milano", "Blumarine", "Bogner", "Bottega Veneta", "Brioni",
+    "Brunello Cucinelli", "Burberry", "By Far", "By Malene Birger", "Canada Goose", "Carhartt WIP",
+    "Carolina Herrera", "Cartier", "Casablanca", "Cecilie Bahnsen", "Celine", "Chanel",
+    "Charles Jeffrey Loverboy", "Charlotte Chesnais", "Chloé", "Christian Louboutin", "Coach",
+    "Coperni", "Courrèges", "Cult Gaia", "David Koma", "De Beers", "Diesel", "Dior",
+    "Dodo Bar Or", "Dolce & Gabbana", "DÔEN", "Dr. Martens", "Dries Van Noten", "Dsquared2",
+    "Elie Saab", "Emilia Wickstead", "Emporio Armani", "Erdem", "Etro", "Fear of God",
+    "Ferragamo", "Fendi", "Fforme", "Fiorucci", "Forte_Forte", "Frame", "Gabriela Hearst",
+    "Ganni", "Gianvito Rossi", "Giorgio Armani", "Givenchy", "Golden Goose", "Gucci",
+    "Herno", "Hermès", "Homme Plissé Issey Miyake", "Hugo Boss", "Hunza G", "Isabel Marant",
+    "Issey Miyake", "Jacquemus", "Jil Sander", "Jimmy Choo", "Johanna Ortiz", "Joseph",
+    "JW Anderson", "Kallmeyer", "Kenzo", "Khaite", "Lacoste", "Lanvin", "Le Kasha",
+    "Le Monde Béryl", "Lemaire", "Leset", "Loewe", "Longchamp", "Loro Piana", "Louis Vuitton",
+    "Magda Butrym", "Maison Kitsuné", "Maison Margiela", "Maje", "Manolo Blahnik", "Marant Étoile",
+    "Marine Serre", "Marni", "Max Mara", "McQueen", "Michael Kors", "Missoni", "Miu Miu",
+    "MM6 Maison Margiela", "Moncler", "Moncler Grenoble", "Moon Boot", "Moschino", "Mugler",
+    "Nanushka", "Nensi Dojaka", "New Balance", "Nike", "Nili Lotan", "Norma Kamali",
+    "Off-White", "On", "Oscar de la Renta", "Our Legacy", "Palm Angels", "Patou",
+    "Perfect Moment", "Peter Do", "Phoebe Philo", "Polo Ralph Lauren", "Prada", "Proenza Schouler",
+    "Pucci", "Rabanne", "Rag & Bone", "Ralph Lauren Collection", "Re/Done", "Reformation",
+    "Rick Owens", "Rixo", "Roger Vivier", "Roksanda", "Rotate", "Sacai", "Saint Laurent",
+    "Salvatore Ferragamo", "Sandro", "Self-Portrait", "Simone Rocha", "Skims", "Sportmax",
+    "St. Agni", "Staud", "Stella McCartney", "Stone Island", "Studio Nicholson", "Supreme",
+    "Taller Marmo", "Ted Baker", "The Attico", "The Frankie Shop", "The North Face", "The Row",
+    "Theory", "Thom Browne", "Tiffany & Co.", "Tods", "Tom Ford", "Tommy Hilfiger", "Toteme",
+    "Ulla Johnson", "Under Armour", "Uniqlo", "Valentino", "Valentino Garavani", "Van Cleef & Arpels",
+    "Veja", "Versace", "Victoria Beckham", "Vivienne Westwood", "Wardrobe.NYC", "Weekend Max Mara",
+    "Wales Bonner", "Y-3", "Yohji Yamamoto", "Zimmermann", "Zadig & Voltaire", "Zegna",
+)

@@ -1,0 +1,26 @@
+.venv/
+.env
+node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc
+tmp/
+
+# Business and customer data must never be committed.
+data/
+backups/
+output/
+outputs/
+phone-preview/
+*.db
+*.db-shm
+*.db-wal
+*.pdf
+*.zip
+*.xlsx
+*.xlsm
+
+# Local tooling and editor files.
+.idea/
+.vscode/
+.DS_Store

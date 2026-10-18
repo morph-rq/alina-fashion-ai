@@ -1,0 +1,10 @@
+[project]
+name = "fashion-order-automation-ss26"
+version = "0.1.0"
+description = "First working prototype for deterministic SS26 fashion-order automation"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

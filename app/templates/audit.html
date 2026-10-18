@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head"><div><p class="eyebrow">Financial history</p><h1>Audit log</h1></div></section>
+<section class="panel"><table class="data-table"><thead><tr><th>Timestamp</th><th>Source</th><th>Entity</th><th>Field</th><th>Previous</th><th>New</th><th>Description</th></tr></thead><tbody>{% for log in logs %}<tr><td>{{ log.timestamp }}</td><td>{{ log.source_user }}</td><td>{{ log.entity_type }} {{ log.entity_id }}</td><td>{{ log.field or '-' }}</td><td class="text">{{ log.previous_value or '-' }}</td><td class="text">{{ log.new_value or '-' }}</td><td class="text">{{ log.description }}</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

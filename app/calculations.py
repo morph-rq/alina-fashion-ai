@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from typing import Iterable, Protocol
 
 
@@ -20,6 +20,26 @@ def decimal_value(value: Decimal | int | str | float | None) -> Decimal:
 
 def money(value: Decimal | int | str | float | None) -> Decimal:
     return decimal_value(value).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def allocate_money(amount: Decimal, weights: dict) -> dict:
+    """Proportional shares whose cents add up exactly to the authoritative total.
+
+    Largest-remainder method; ties go to the smaller key so results are stable.
+    """
+    amount = money(amount)
+    total = sum(weights.values(), ZERO)
+    if not weights or total <= 0:
+        if amount == ZERO:
+            return {key: ZERO for key in weights}
+        raise ValueError("Selected goods need a positive allocation weight")
+    exact = {key: amount * weight / total for key, weight in weights.items()}
+    result = {key: value.quantize(CENT, rounding=ROUND_DOWN) for key, value in exact.items()}
+    remainder = int((amount - sum(result.values(), ZERO)) * 100)
+    order = sorted(weights, key=lambda key: (-(exact[key] - result[key]), (key is None, key if key is not None else 0)))
+    for key in order[:remainder]:
+        result[key] += CENT
+    return result
 
 
 def display_money(value: Decimal | int | str | float | None) -> Decimal:
@@ -130,7 +150,9 @@ def calculate_order(
     result.base = money(result.base)
     result.markup = money(result.markup)
     result.final = money(result.final)
-    result.required_prepayment = money(sum((value * rate for rate, value in initial_buckets.items()), ZERO))
+    # Each payment-rate bucket is rounded once; customer shares are then allocated
+    # cent-exactly from these rounded totals (services.client_initial_charges).
+    result.required_prepayment = money(sum((money(value * rate) for rate, value in initial_buckets.items()), ZERO))
     result.ready_balance_due = money(result.ready_balance_due)
     result.ready = money(result.ready)
     result.shipments = {key: money(value) for key, value in result.shipments.items()}

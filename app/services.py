@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.calculations import signed_payment_amount, AccountAmounts, OrderAmounts, ZERO, calculate_account, calculate_order, item_amounts, money, transport_fee
+from app.calculations import AccountAmounts, OrderAmounts, ZERO, allocate_money, calculate_account, calculate_order, item_amounts, money, signed_payment_amount, transport_fee
 from app.models import BrandSeasonRule, Customer, Expense, FactoryPayment, Order, OrderItem, Payment, PaymentAllocation, ReadyBatch, Season, Shipment, ShipmentItem
 from app.models import PurchaseGroup
 from app.worksheet import split_cost
@@ -88,6 +88,57 @@ def order_summary(order: Order) -> OrderSummary:
     return OrderSummary(order=order, amounts=calculate_order(order.items, rule.initial_prepayment_percentage, rule.ready_balance_percentage))
 
 
+# --- Payment-stage liabilities -------------------------------------------------
+# One place for the rates and rounding used by statements, dashboards, System
+# Check, To-do and exports. Customer charges use the customer value (wholesale +
+# markup, or the selling override); factory liabilities use the wholesale base.
+
+def item_rates(item: OrderItem) -> tuple[Decimal, Decimal]:
+    """(initial, Ready) percentages: a purchase group's terms override the brand rule."""
+    group = getattr(item, "purchase_group", None)
+    if group is not None:
+        return group.initial_percentage, group.shipment_percentage
+    rule = order_rule(item.order)
+    return rule.initial_prepayment_percentage, rule.ready_balance_percentage
+
+
+def _active(items):
+    return [item for item in items if item.status != "Cancelled"]
+
+
+def client_initial_charges(order: Order) -> dict[int | None, Decimal]:
+    """Customer shares of the order's initial charge, reconciling to the cent."""
+    buckets: dict[Decimal, dict[int | None, Decimal]] = {}
+    for item in _active(order.items):
+        weights = buckets.setdefault(item_rates(item)[0], {})
+        weights[item.customer_id] = weights.get(item.customer_id, ZERO) + item_amounts(item).final
+    shares: dict[int | None, Decimal] = {}
+    for rate, weights in buckets.items():
+        if sum(weights.values(), ZERO) <= ZERO:
+            continue
+        for customer_id, value in allocate_money(money(sum(weights.values(), ZERO) * rate), weights).items():
+            shares[customer_id] = money(shares.get(customer_id, ZERO) + value)
+    return shares
+
+
+def customer_ready_due(item: OrderItem) -> Decimal:
+    if item.status == "Cancelled":
+        return ZERO
+    return money(item_amounts(item).final * item_rates(item)[1])
+
+
+def factory_initial_due(order: Order) -> Decimal:
+    buckets: dict[Decimal, Decimal] = {}
+    for item in _active(order.items):
+        rate = item_rates(item)[0]
+        buckets[rate] = buckets.get(rate, ZERO) + item_amounts(item).base
+    return money(sum((money(value * rate) for rate, value in buckets.items()), ZERO))
+
+
+def factory_ready_due(items) -> Decimal:
+    return money(sum((money(item_amounts(item).base * item_rates(item)[1]) for item in _active(items)), ZERO))
+
+
 def item_transport_fee(item: OrderItem, shipment: Shipment) -> Decimal:
     if item.status == "Cancelled":
         return ZERO
@@ -141,7 +192,8 @@ def dashboard_data(session: Session, season_name: str | None = None) -> Dashboar
     shipment_fees_total = money(sum((item.total_fees for item in shipment_summaries.values()), ZERO))
     paid = sum((signed_payment_amount(payment.amount, payment.type) for payment in session.scalars(select(Payment).where(Payment.season_id == season.id)).all()), ZERO)
     account = calculate_account(paid, money(totals.current_merchandise_charge + expenses_total + shipment_fees_total))
-    factory_required = money(totals.required_prepayment + totals.ready_balance_due)
+    factory_required = money(sum((factory_initial_due(order) + factory_ready_due(
+        [item for item in order.items if item.ready_batch_id]) for order in season.orders), ZERO))
     factory_paid = money(sum(session.scalars(
         select(FactoryPayment.amount).where(FactoryPayment.season_id == season.id)
     ).all(), ZERO))
@@ -177,7 +229,7 @@ def ready_collection_status(session: Session, batch_id: int) -> ReadyCollectionS
     for item in batch.items:
         if item.status == "Cancelled":
             continue
-        due = money(item_amounts(item).final * (item.purchase_group.shipment_percentage if item.purchase_group else order_rule(item.order).ready_balance_percentage))
+        due = customer_ready_due(item)
         requirements[item.customer_id] = money(requirements.get(item.customer_id, ZERO) + due)
 
     allocations = list(session.scalars(
@@ -247,7 +299,36 @@ class CustomerStatement:
     group_special_costs: Decimal = ZERO
 
 
-def customer_statement(session: Session, customer_id: int, season_name: str | None = None) -> CustomerStatement:
+def _full_payment_dates(session: Session, customer_ids: set, season_name: str) -> list[date]:
+    """Dates each customer finished paying all current season charges, or [] if any has not.
+
+    A delivery estimate needs every affected customer to settle their own Ready
+    share and their full current season charges, including fees. A later refund
+    or new charge reopens the balance and withdraws the estimate.
+    """
+    dates: list[date] = []
+    for customer_id in customer_ids:
+        if customer_id is None:
+            return []
+        account = customer_statement(session, customer_id, season_name, compute_delivery=False)
+        if account.account.outstanding > ZERO:
+            return []
+        balance, paid_on = ZERO, None
+        for payment in account.payments:
+            previous = balance
+            balance += signed_payment_amount(payment.amount, payment.type)
+            if previous < account.account.total_charged <= balance:
+                paid_on = payment.date
+            elif balance < account.account.total_charged:
+                paid_on = None
+        if paid_on:
+            dates.append(paid_on)
+        elif account.account.total_charged > ZERO:
+            return []
+    return dates
+
+
+def customer_statement(session: Session, customer_id: int, season_name: str | None = None, *, compute_delivery: bool = True) -> CustomerStatement:
     customer = session.get(Customer, customer_id)
     if customer is None:
         raise LookupError("Customer not found")
@@ -261,19 +342,18 @@ def customer_statement(session: Session, customer_id: int, season_name: str | No
     per_batch: dict[int, list[OrderItem]] = {}
     for item in items:
         value = item_amounts(item).final
-        rule = order_rule(item.order)
         ordered += value
-        group = item.purchase_group
-        initial += money(value * (group.initial_percentage if group else rule.initial_prepayment_percentage))
         per_order.setdefault(item.order_id, []).append(item)
         if item.ready_batch_id:
-            ready_due += money(value * (group.shipment_percentage if group else rule.ready_balance_percentage))
+            ready_due += customer_ready_due(item)
             per_batch.setdefault(item.ready_batch_id, []).append(item)
         if item.shipment_link:
             shipped += value
             shipments.setdefault(item.shipment_link.shipment_id, []).append(item)
         elif item.ready_batch_id or item.status == "Ready":
             ready += value
+
+    initial = sum((client_initial_charges(order_items[0].order).get(customer.id, ZERO) for order_items in per_order.values()), ZERO)
 
     transport_costs = fixed_costs = ZERO
     shipment_costs: dict[int, Decimal] = {}
@@ -334,14 +414,15 @@ def customer_statement(session: Session, customer_id: int, season_name: str | No
     ).order_by(Payment.date, Payment.id)).all())
     paid = sum((signed_payment_amount(payment.amount, payment.type) for payment in payments), ZERO)
     expected_receipts: dict[int, date | None] = {}
-    for batch_id, batch_items in per_batch.items():
+    for batch_id, batch_items in (per_batch.items() if compute_delivery else []):
         batch = session.get(ReadyBatch, batch_id)
         all_batch_items = [item for item in (batch.items if batch else []) if item.status != "Cancelled"]
-        due = sum((money(item_amounts(item).final * (item.purchase_group.shipment_percentage if item.purchase_group else order_rule(item.order).ready_balance_percentage)) for item in all_batch_items), ZERO)
+        due = sum((customer_ready_due(item) for item in all_batch_items), ZERO)
         collection = ready_collection_status(session, batch_id)
-        if due > ZERO and collection.completion_date:
+        paid_dates = _full_payment_dates(session, {item.customer_id for item in all_batch_items}, season.name)
+        if due > ZERO and collection.completion_date and paid_dates:
             days = max(order_rule(item.order).expected_receipt_days for item in all_batch_items)
-            expected_receipts[batch_id] = collection.completion_date + timedelta(days=days)
+            expected_receipts[batch_id] = max(collection.completion_date, max(paid_dates)) + timedelta(days=days)
         else:
             expected_receipts[batch_id] = None
 

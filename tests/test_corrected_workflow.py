@@ -108,6 +108,13 @@ def test_partial_ready_is_allocated_per_item_and_receipt_waits_for_every_custome
     workflow_session.add(PaymentAllocation(payment_id=sv_payment.id, ready_batch_id=batch.id, stage="ready", amount=D("350")))
     workflow_session.flush()
     assert ready_collection_status(workflow_session, batch.id).completion_date == date(2026, 9, 5)
+    # Ready collection alone is insufficient: initial and other current charges must also be paid.
+    assert customer_statement(workflow_session, aa.id).expected_receipts[batch.id] is None
+    workflow_session.add_all([
+        Payment(season_id=batch.season_id, customer_id=aa.id, date=date(2026, 9, 5), amount=D('1150'), type='payment'),
+        Payment(season_id=batch.season_id, customer_id=sv.id, date=date(2026, 9, 5), amount=D('350'), type='payment'),
+    ])
+    workflow_session.flush()
     assert customer_statement(workflow_session, aa.id).expected_receipts[batch.id] == date(2026, 9, 19)
 
 

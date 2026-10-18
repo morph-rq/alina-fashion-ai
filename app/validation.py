@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.calculations import signed_payment_amount, ZERO, item_amounts, money
 from app.models import AllocationReview, Expense, FactoryPayment, ImportReview, Order, OrderItem, Payment, PaymentAllocation, ReadyBatch, Season, Shipment, ShipmentItem
-from app.services import country_is_transport_exempt, dashboard_data, item_transport_fee, order_rule, order_summary, ready_collection_status
+from app.services import client_initial_charges, country_is_transport_exempt, customer_ready_due, dashboard_data, factory_initial_due, factory_ready_due, item_transport_fee, order_rule, order_summary, ready_collection_status
 
 
 @dataclass(frozen=True)
@@ -154,13 +154,14 @@ def validate_system(session: Session) -> ValidationReport:
         selectinload(ReadyBatch.items).selectinload(OrderItem.order).selectinload(Order.season).selectinload(Season.rules),
         selectinload(ReadyBatch.payment_allocations).selectinload(PaymentAllocation.payment),
     )).all():
-        due = money(sum((money(item_amounts(item).final * order_rule(item.order).ready_balance_percentage) for item in batch.items if item.status != "Cancelled"), ZERO))
+        due = money(sum((customer_ready_due(item) for item in batch.items), ZERO))
+        factory_due = factory_ready_due(batch.items)
         customer_paid = money(sum((signed_payment_amount(allocation.amount, allocation.payment.type) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
         factory_paid = money(sum(session.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id, FactoryPayment.stage == "ready")).all(), ZERO))
         if customer_paid != due:
             issues.append(ValidationIssue("warning", "READY_PAYMENT_MISMATCH", f"Required customer Ready payments {due}; allocated {customer_paid}", batch.name))
-        if factory_paid != due:
-            issues.append(ValidationIssue("warning", "FACTORY_READY_MISMATCH", f"Factory Ready liability {due}; recorded paid {factory_paid}", batch.name))
+        if factory_paid != factory_due:
+            issues.append(ValidationIssue("warning", "FACTORY_READY_MISMATCH", f"Factory Ready liability {factory_due}; recorded paid {factory_paid}", batch.name))
         collection = ready_collection_status(session, batch.id)
         for customer_id, customer_due in collection.requirements.items():
             if customer_id is None:
@@ -188,19 +189,17 @@ def validate_system(session: Session) -> ValidationReport:
     if dashboard:
         allocated_initial = allocated_ready = ZERO
         for order in orders:
-            rule = order_rule(order)
+            if order.season_id != dashboard.season.id:
+                continue
+            allocated_initial += sum((value for customer_id, value in client_initial_charges(order).items() if customer_id is not None), ZERO)
             for item in order.items:
-                if item.status == "Cancelled" or item.customer_id is None:
-                    continue
-                value = item_amounts(item).final
-                allocated_initial += money(value * rule.initial_prepayment_percentage)
-                if item.ready_batch_id:
-                    allocated_ready += money(value * rule.ready_balance_percentage)
+                if item.customer_id is not None and item.ready_batch_id:
+                    allocated_ready += customer_ready_due(item)
         if money(allocated_initial) != dashboard.totals.required_prepayment:
             issues.append(ValidationIssue("error", "CUSTOMER_INITIAL_ALLOCATION_MISMATCH", f"Factory initial due {dashboard.totals.required_prepayment}; allocated to customers {money(allocated_initial)}", dashboard.season.name))
         if money(allocated_ready) != dashboard.totals.ready_balance_due:
             issues.append(ValidationIssue("error", "CUSTOMER_READY_ALLOCATION_MISMATCH", f"Factory Ready due {dashboard.totals.ready_balance_due}; allocated to customers {money(allocated_ready)}", dashboard.season.name))
-        initial_factory_due = dashboard.totals.required_prepayment
+        initial_factory_due = money(sum((factory_initial_due(order) for order in orders if order.season_id == dashboard.season.id), ZERO))
         factory_paid = money(sum(session.scalars(select(FactoryPayment.amount).where(FactoryPayment.season_id == dashboard.season.id, FactoryPayment.stage == "initial")).all(), ZERO))
         if factory_paid != initial_factory_due:
             issues.append(ValidationIssue("warning", "FACTORY_INITIAL_MISMATCH", f"Factory initial due {initial_factory_due}; recorded paid {factory_paid}", dashboard.season.name))
@@ -223,13 +222,7 @@ def validate_system(session: Session) -> ValidationReport:
             signed = signed_payment_amount(allocation.amount, allocation.payment.type)
             initial_by_customer_order[key] = money(initial_by_customer_order.get(key, ZERO) + signed)
         for order in orders:
-            rule = order_rule(order)
-            customer_due: dict[int, Decimal] = {}
-            for item in order.items:
-                if item.status == "Cancelled" or item.customer_id is None:
-                    continue
-                due = money(item_amounts(item).final * rule.initial_prepayment_percentage)
-                customer_due[item.customer_id] = money(customer_due.get(item.customer_id, ZERO) + due)
+            customer_due = {customer_id: due for customer_id, due in client_initial_charges(order).items() if customer_id is not None}
             for customer_id, due in customer_due.items():
                 allocated = initial_by_customer_order.get((customer_id, order.id), ZERO)
                 if allocated and allocated != due:
@@ -240,17 +233,13 @@ def validate_system(session: Session) -> ValidationReport:
         )).all()
         if tagged_factory_payments:
             for order in orders:
-                initial_due = order_summary(order).amounts.required_prepayment
+                initial_due = factory_initial_due(order)
                 paid = money(sum((payment.amount for payment in tagged_factory_payments if payment.order_id == order.id and payment.stage == "initial"), ZERO))
                 if paid != initial_due:
                     issues.append(ValidationIssue("warning", "FACTORY_ORDER_INITIAL_MISMATCH", f"Factory order initial due {initial_due}; paid {paid}", f"{order.brand.name} / {order.season.name}"))
             for batch in session.scalars(select(ReadyBatch).where(ReadyBatch.season_id == dashboard.season.id)).all():
                 for order in orders:
-                    due = money(sum((
-                        item_amounts(item).final * order_rule(order).ready_balance_percentage
-                        for item in order.items
-                        if item.ready_batch_id == batch.id and item.status != "Cancelled"
-                    ), ZERO))
+                    due = factory_ready_due([item for item in order.items if item.ready_batch_id == batch.id])
                     if due <= ZERO:
                         continue
                     paid = money(sum((

@@ -64,7 +64,7 @@ from app.operations import operations_inbox
 from app.ready_importer import process_ready_workbook
 from app.schemas import DashboardSummary, ValidationReportSchema
 from app.season_builder import build_season_draft, create_season_workspace, intake_schema
-from app.services import customer_statement, dashboard_data, order_rule, order_summary, shipment_summary
+from app.services import customer_ready_due, customer_statement, dashboard_data, factory_ready_due, order_rule, order_summary, shipment_summary
 from app.validation import validate_system
 from app.worksheet_routes import render_worksheet, install_worksheet, amount_value
 from app.storage import install_storage, backup_worker
@@ -1482,10 +1482,11 @@ def ready_batches_page(request: Request, season: str = "", db: Session = Depends
     rows = []
     for batch in batches:
         value = money(sum((item_amounts(item).final for item in batch.items if item.status != "Cancelled"), ZERO))
-        due = money(sum((item_amounts(item).final * order_rule(item.order).ready_balance_percentage for item in batch.items if item.status != "Cancelled"), ZERO))
+        due = money(sum((customer_ready_due(item) for item in batch.items), ZERO))
         customer_paid = money(sum((signed_payment_amount(allocation.amount, allocation.payment.type) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
-        factory_paid = money(sum(db.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id)).all(), ZERO))
-        rows.append({"batch": batch, "value": value, "due": due, "customer_paid": customer_paid, "factory_paid": factory_paid})
+        factory_paid = money(sum(db.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id, FactoryPayment.stage == "ready")).all(), ZERO))
+        rows.append({"batch": batch, "value": value, "due": due, "customer_paid": customer_paid,
+                     "factory_due": factory_ready_due(batch.items), "factory_paid": factory_paid})
     orders = db.scalars(
         select(Order).where(Order.season_id == season.id).options(selectinload(Order.brand)).order_by(Order.id)
     ).all() if season else []

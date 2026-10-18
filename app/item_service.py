@@ -291,6 +291,7 @@ def change_item(db: Session, item: OrderItem, values: dict, *, actor: str, chann
         customer = db.get(Customer, item.customer_id) if item.customer_id else None
         item.allocation_status = "Allocated" if customer else "Review"
         db.flush()
+        db.expire(item, ["customer"])  # The relationship may hold the previous customer.
         _sync_allocation_review(db, item, actor, channel, reason)
     db.flush()
     return result

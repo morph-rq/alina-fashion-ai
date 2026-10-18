@@ -109,3 +109,33 @@ def test_assigning_customer_resolves_note_with_recorded_reason(workspace_session
     review = db.scalar(select(AllocationReview).where(AllocationReview.row == item.source_row))
     assert review.status == 'Resolved' and review.resolved_customer_id == maria.id
     assert review.resolution_note and review.resolved_at
+
+
+def test_allocation_note_is_resolved_from_evidence_by_splitting_units(workspace_session, workspace_client):
+    db = workspace_session
+    order = db.scalar(select(OrderItem)).order
+    maria = db.scalar(select(Customer))
+    kim = Customer(code='KI', name='Kim')
+    db.add(kim)
+    db.flush()
+    item = OrderItem(order_id=order.id, name='Shirt', size='M', quantity=3, wholesale_unit_price=D('10'), markup_percentage=D('0.30'),
+                     source_file='supplier.xlsx', source_sheet='Shirts', source_row=4, allocation_status='Review')
+    db.add(item)
+    db.flush()
+    review = AllocationReview(source_file='supplier.xlsx', sheet='Shirts', row=4, raw_description='MA M x2, KI M', raw_values='{}', reason='ambiguous')
+    db.add(review)
+    db.commit()
+    page = workspace_client.get(f'/source-reviews/allocation/{review.id}')
+    assert page.status_code == 200 and 'Allocate 3 unit(s)' in page.text and '<strong>KI</strong>' in page.text
+    # A short reason or a wrong unit total is refused without changes.
+    bad = workspace_client.post(f'/source-reviews/allocation/{review.id}/allocate',
+                                data={'customer_id': [str(maria.id)], 'quantity': ['2'], 'resolution': 'Supplier e-mail of 3 Oct'})
+    assert bad.status_code == 422
+    good = workspace_client.post(f'/source-reviews/allocation/{review.id}/allocate',
+                                 data={'customer_id': [str(maria.id), str(kim.id)], 'quantity': ['2', '1'],
+                                       'resolution': 'Supplier e-mail of 3 Oct lists MA two, KI one'})
+    assert good.status_code == 200 and 'after:' in good.text
+    rows = db.scalars(select(OrderItem).where(OrderItem.source_row == 4)).all()
+    assert sorted((row.customer.code, row.quantity) for row in rows) == [('KI', 1), ('MA', 2)]
+    db.refresh(review)
+    assert review.status == 'Resolved' and 'Supplier e-mail' in review.resolution_note

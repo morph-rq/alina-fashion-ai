@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, Form, HTTPException, Request
@@ -5,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models import AllocationReview, ImportReview, OrderItem
+from app.models import AllocationReview, Customer, ImportReview, OrderItem
 from app.worksheet import audit
 
 
@@ -33,8 +34,39 @@ def install_source_reviews(app,templates,context):
 
     @app.get('/source-reviews/{kind}/{identity}')
     def detail(kind: str,identity: int,request: Request,db=Depends(get_db)):
+        from app.allocation_resolution import candidate_customers
         review = get_review(db,kind,identity)
-        return templates.TemplateResponse(request,'source_reviews.html',context(request,kind=kind,review=review,items=source_items(db,review)))
+        items = source_items(db,review)
+        extra = {}
+        if kind == 'allocation':
+            extra = dict(candidates=candidate_customers(db,review),
+                         customers=db.scalars(select(Customer).order_by(Customer.code)).all(),
+                         total_units=sum(i.quantity for i in items if i.status != 'Cancelled'),
+                         before=request.query_params.get('before'),after=request.query_params.get('after'))
+        return templates.TemplateResponse(request,'source_reviews.html',context(request,kind=kind,review=review,items=items,**extra))
+
+    @app.post('/source-reviews/allocation/{identity}/allocate')
+    async def allocate(identity: int,request: Request,db=Depends(get_db)):
+        from app.allocation_resolution import resolve_allocation
+        from app.item_service import ItemRuleError
+        review = get_review(db,'allocation',identity)
+        form = await request.form()
+        lines = []
+        for customer_id, quantity in zip(form.getlist('customer_id'), form.getlist('quantity')):
+            if not str(customer_id).strip() and not str(quantity).strip():
+                continue
+            if not str(customer_id).isdigit() or not str(quantity).isdigit():
+                raise HTTPException(422,'Each allocation line needs a customer and a whole quantity.')
+            lines.append((int(customer_id), int(quantity)))
+        try:
+            outcome = resolve_allocation(db,review,lines,str(form.get('resolution','')))
+        except ItemRuleError as exc:
+            db.rollback()
+            raise HTTPException(422,str(exc)) from None
+        db.commit()
+        summary = lambda counts: ', '.join(f'{code} {count}' for code, count in sorted(counts.items())) or 'no errors'
+        from urllib.parse import urlencode
+        return RedirectResponse(f'/source-reviews/allocation/{identity}?'+urlencode({'before':summary(outcome.errors_before),'after':summary(outcome.errors_after)}),303)
 
     @app.post('/source-reviews/{kind}/{identity}/resolve')
     def resolve(kind: str,identity: int,resolution: str=Form(...),db=Depends(get_db)):
@@ -50,6 +82,8 @@ def install_source_reviews(app,templates,context):
             ids = {i.customer_id for i in items}
             review.resolved_customer_id = next(iter(ids)) if len(ids)==1 else None
         review.status = 'Resolved'
+        review.resolution_note = resolution.strip()
+        review.resolved_at = datetime.now(timezone.utc)
         audit(db,type(review).__name__,review.id,f'Source review resolved by user: {resolution.strip()}')
         db.commit()
         return RedirectResponse(f'/source-reviews/{kind}/{identity}',303)

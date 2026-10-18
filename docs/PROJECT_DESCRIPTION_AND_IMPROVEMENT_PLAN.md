@@ -401,4 +401,4 @@ evidence and remaining work: `docs/IMPLEMENTATION_PROGRESS.md`.
 | Drive / Gmail | Implemented, tested against simulated Google; real account setup pending | `docs/drive-gmail-setup.md` |
 | Recovery | Implemented; local restore exercise passed on real testing data | `docs/backup-restore.md` |
 
-Test suite: 168 passed (was 108 + 1 failing).
+Test suite: 186 passed (was 108 + 1 failing).

@@ -14,7 +14,7 @@ tests; **no real Google account has been connected**.
   repository now records every stage (`git log`); business data is git-ignored.
 * Test baseline: 108 passed, 1 failed (outdated library assertion). With the workspace `.env` credentials
   most route tests returned 401; `tests/conftest.py` now isolates settings, database, secrets and folders.
-* Run tests: `& ..\alina-fashion\.venv\Scripts\python.exe -m pytest -q` (now **168 passed**).
+* Run tests: `& ..\alina-fashion\.venv\Scripts\python.exe -m pytest -q` (now **186 passed**).
 * Visual preview without login or live services: `python scripts\dev_preview.py` (127.0.0.1:8001 only).
 
 ## Capability / migration map (main vs testing)
@@ -99,6 +99,20 @@ tests; **no real Google account has been connected**.
 * Real check on the testing copy: snapshot 341 files / 400 rows / 77 MB, restore exercise passed. Encrypted
   archive, upload and code-only restore are covered by tests (simulated Drive). A real recovery code was not
   created (the operator should create and store their own).
+
+## Independent code review (2026-10-18)
+
+A read-only review of the new modules found 15 issues; all were fixed with a regression test each
+(`tests/test_review_fixes.py`): Gmail mail labelled after arrival was missed; one oversized e-mail blocked a
+Gmail source; outbox failures were rolled back (duplicate folders/uploads, no reconnect state); syncs held
+the SQLite write lock during downloads and job leases were not renewed (now per-item commits, WAL with a
+busy timeout, lease heartbeat); duplicate new customers in one save; the connection's full-scope token was
+sent to the Picker page and there was no Host check (now a separate drive.file-only token and a host
+allowlist); a wrong-account reconnect could revoke another connection; non-Latin evidence names failed to
+download; empty attachments made Gmail retries fail; reset removed connection settings and could stop the
+worker; a rejected access token was not refreshed; malformed separators were read as large amounts; zero
+final prices were accepted; inbox items started in the newest season silently; the backup fingerprint missed
+in-place edits.
 
 ## Remaining work and decisions
 

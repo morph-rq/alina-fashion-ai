@@ -60,6 +60,7 @@ from app.models import (
 )
 from app.pdf_report import build_all_customer_pdfs, build_customer_pdf
 from app.pricing import wholesale_from_final
+from app import item_service
 from app.operations import operations_inbox
 from app.ready_importer import process_ready_workbook
 from app.schemas import DashboardSummary, ValidationReportSchema
@@ -1093,57 +1094,21 @@ def create_item(
     ))
     if order is None:
         raise HTTPException(404, "Order not found")
-    if status not in STATUSES:
-        raise HTTPException(422, "Unsupported status")
-    price = money(required_decimal(wholesale_unit_price, "price"))
-    if price < ZERO:
-        raise HTTPException(422, "Price cannot be negative")
-    markup = (
-        required_decimal(markup_percentage, "markup") / Decimal("100")
-        if markup_percentage.strip()
-        else order_rule(order).markup_percentage
-    )
-    if markup < ZERO or markup > Decimal("1"):
-        raise HTTPException(422, "Markup must be between 0% and 100%")
-    new_customer_id = parse_optional_id(customer_id, "customer")
-    new_ready_batch_id = parse_optional_id(ready_batch_id, "Ready batch")
-    new_shipment_id = parse_optional_id(shipment_id, "shipment")
-    if new_customer_id and db.get(Customer, new_customer_id) is None:
-        raise HTTPException(422, "Customer not found")
-    batch = db.get(ReadyBatch, new_ready_batch_id) if new_ready_batch_id else None
-    if new_ready_batch_id and (batch is None or batch.season_id != order.season_id):
-        raise HTTPException(422, "Ready batch does not belong to this season")
-    selected_shipment = db.get(Shipment, new_shipment_id) if new_shipment_id else None
-    if new_shipment_id and (selected_shipment is None or selected_shipment.season_id != order.season_id):
-        raise HTTPException(422, "Shipment does not belong to this season")
-    if new_shipment_id and not new_ready_batch_id:
-        raise HTTPException(422, "A product must belong to a Ready batch before shipment assignment")
-    if status == "Ready" and not new_ready_batch_id:
-        raise HTTPException(422, "Ready status requires a Ready batch")
-    if new_shipment_id:
-        status = "Assigned to shipment"
-    elif new_ready_batch_id and status in {"Ordered", "Confirmed", "Production"}:
-        status = "Ready"
-    item = OrderItem(
-        order_id=order.id,
-        customer_id=new_customer_id,
-        ready_batch_id=new_ready_batch_id,
-        article=article.strip() or None,
-        name=name.strip() or None,
-        color=color.strip() or None,
-        size=size.strip() or None,
-        quantity=quantity,
-        wholesale_unit_price=price,
-        selling_unit_price=optional_selling_price(selling_unit_price),
-        markup_percentage=markup,
-        status=status,
-        source_file="Manual entry",
-        source_sheet=order.source_sheet or order.brand.name,
-        source_allocation_description=(db.get(Customer, new_customer_id).code if new_customer_id else None),
-        allocation_status="Allocated" if new_customer_id else "Review",
-    )
-    db.add(item)
-    db.flush()
+    try:
+        values = {
+            "customer_id": parse_optional_id(customer_id, "customer"),
+            "article": article, "name": name, "color": color, "size": size, "quantity": quantity,
+            "wholesale_unit_price": item_service.parse_money(wholesale_unit_price, "Price"),
+            "selling_unit_price": item_service.parse_money(selling_unit_price, "Selling price", optional=True),
+            "markup_percentage": item_service.parse_percent(markup_percentage) if markup_percentage.strip() else order_rule(order).markup_percentage,
+            "status": status,
+            "ready_batch_id": parse_optional_id(ready_batch_id, "Ready batch"),
+            "shipment_id": parse_optional_id(shipment_id, "shipment"),
+        }
+        item = item_service.create_item(db, order, values, actor=source_user, channel="Manual entry").item
+    except item_service.ItemRuleError as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from None
     created_image_path = None
     if image is not None and image.filename:
         try:
@@ -1167,22 +1132,6 @@ def create_item(
         item.image_context_url = image_context_url.strip() or None
         item.image_match_method = "manual_search_confirmed"
         item.image_updated_at = datetime.now()
-    if item.source_file == "Manual entry":
-        item.source_row = item.id
-    if not new_customer_id:
-        db.add(AllocationReview(
-            source_file="Manual entry", sheet=item.source_sheet or order.brand.name,
-            row=item.source_row, raw_description=None,
-            raw_values=json.dumps({"article": item.article, "product": item.name, "size": item.size, "quantity": item.quantity}, ensure_ascii=False),
-            reason="Owner-created product has no customer; assign it before customer accounting",
-        ))
-    if new_shipment_id:
-        db.add(ShipmentItem(shipment_id=new_shipment_id, order_item_id=item.id))
-    record_change(
-        db, entity_type="OrderItem", entity_id=item.id, field=None, previous_value=None,
-        new_value=f"{order.brand.name} {item.article or item.name or item.id}", source_user=source_user,
-        description=f"Created {order.brand.name} product row for customer {db.get(Customer, new_customer_id).code if new_customer_id else 'Needs Review'}",
-    )
     try:
         db.commit()
     except Exception:
@@ -1290,6 +1239,8 @@ async def update_item(
     ready_batch_id: str = Form(""),
     shipment_id: str = Form(""),
     source_user: str = Form("web user"),
+    revision: str = Form(""),
+    correction_reason: str = Form(""),
     db: Session = Depends(get_db),
 ):
     item = db.scalar(
@@ -1302,99 +1253,27 @@ async def update_item(
     )
     if item is None:
         raise HTTPException(404, "Item not found")
-    if status not in STATUSES:
-        raise HTTPException(422, "Unsupported status")
-    price = required_decimal(wholesale_unit_price, "price")
-    markup = required_decimal(markup_percentage, "markup") / Decimal("100")
-    if price < ZERO:
-        raise HTTPException(422, "Price cannot be negative")
-    if markup < ZERO or markup > Decimal("1"):
-        raise HTTPException(422, "Markup must be between 0% and 100%")
-    new_customer_id = parse_optional_id(customer_id, "customer")
-    new_shipment_id = parse_optional_id(shipment_id, "shipment")
-    new_ready_batch_id = parse_optional_id(ready_batch_id, "Ready batch")
-    if item.customer_id != new_customer_id and db.scalar(select(SellerCreditAccount.id).where(SellerCreditAccount.item_id == item.id)):
-        raise HTTPException(422, 'This product has seller-credit history; its customer identity is locked.')
-    if new_customer_id and db.get(Customer, new_customer_id) is None:
-        raise HTTPException(422, "Customer not found")
-    selected_shipment = db.get(Shipment, new_shipment_id) if new_shipment_id else None
-    if new_shipment_id and (selected_shipment is None or selected_shipment.season_id != item.order.season_id):
-        raise HTTPException(422, "Shipment does not belong to this season")
-    batch = db.get(ReadyBatch, new_ready_batch_id) if new_ready_batch_id else None
-    if new_ready_batch_id and (batch is None or batch.season_id != item.order.season_id):
-        raise HTTPException(422, "Ready batch does not belong to this season")
-    changes = {
-        "customer_id": new_customer_id,
-        "article": article.strip() or None,
-        "name": name.strip() or None,
-        "color": color.strip() or None,
-        "size": size.strip() or None,
-        "quantity": quantity,
-        "wholesale_unit_price": money(price),
-        "markup_percentage": markup,
-        "status": status,
-        "ready_batch_id": new_ready_batch_id,
-        "allocation_status": "Allocated" if new_customer_id else "Review",
-    }
-    # Old clients that omit this field must preserve an existing override.
-    if "selling_unit_price" in await request.form():
-        changes["selling_unit_price"] = optional_selling_price(selling_unit_price or "")
-    if status != item.status:
-        changes['worksheet_status'] = 'done' if status in {'Delivered','Arrived'} else 'pending' if status == 'Cancelled' else 'process'
-    if status == "Ready" and not new_ready_batch_id:
-        raise HTTPException(422, "Ready status requires a Ready batch")
-    if new_shipment_id and status in {"Ordered", "Confirmed", "Production", "Ready"}:
-        changes["status"] = "Assigned to shipment"
-    elif new_ready_batch_id and status in {"Ordered", "Confirmed", "Production"}:
-        changes["status"] = "Ready"
-    if new_shipment_id and not new_ready_batch_id:
-        raise HTTPException(422, "A product must belong to a Ready batch before shipment assignment")
-    for field, value in changes.items():
-        previous = getattr(item, field)
-        if previous != value:
-            setattr(item, field, value)
-            record_change(
-                db,
-                entity_type="OrderItem",
-                entity_id=item.id,
-                field=field,
-                previous_value=previous,
-                new_value=value,
-                source_user=source_user,
-                description=f"{item.customer.code if item.customer else '-'} - {item.order.brand.name} {item.article or item.name}: {field} changed {previous} -> {value}",
-            )
-    previous_shipment = item.shipment_id
-    if previous_shipment != new_shipment_id:
-        if item.shipment_link:
-            db.delete(item.shipment_link)
-            db.flush()
-        if new_shipment_id:
-            db.add(ShipmentItem(shipment_id=new_shipment_id, order_item_id=item.id))
-        record_change(
-            db,
-            entity_type="OrderItem",
-            entity_id=item.id,
-            field="shipment_id",
-            previous_value=previous_shipment,
-            new_value=new_shipment_id,
-            source_user=source_user,
-            description=f"{item.order.brand.name} {item.article or item.name}: shipment changed {previous_shipment} -> {new_shipment_id}",
+    try:
+        values = {
+            "customer_id": parse_optional_id(customer_id, "customer"),
+            "article": article, "name": name, "color": color, "size": size, "quantity": quantity,
+            "wholesale_unit_price": item_service.parse_money(wholesale_unit_price, "Price"),
+            "markup_percentage": item_service.parse_percent(markup_percentage),
+            "status": status,
+            "ready_batch_id": parse_optional_id(ready_batch_id, "Ready batch"),
+            "shipment_id": parse_optional_id(shipment_id, "shipment"),
+        }
+        # Old clients that omit this field must preserve an existing override.
+        if "selling_unit_price" in await request.form():
+            values["selling_unit_price"] = item_service.parse_money(selling_unit_price or "", "Selling price", optional=True)
+        item_service.change_item(
+            db, item, values, actor=source_user, channel="product editor",
+            expected_revision=int(revision) if revision.strip().isdigit() else None,
+            reason=correction_reason,
         )
-    review = db.scalar(select(AllocationReview).where(
-        AllocationReview.sheet == (item.source_sheet or ""),
-        AllocationReview.row == item.source_row,
-        AllocationReview.status == "Open",
-    ).order_by(AllocationReview.id.desc()))
-    if new_customer_id and review:
-        review.status = "Resolved"
-        review.resolved_customer_id = new_customer_id
-    elif not new_customer_id and item.status != "Cancelled" and review is None:
-        db.add(AllocationReview(
-            source_file=item.source_file or "Manual edit", sheet=item.source_sheet or item.order.brand.name,
-            row=item.source_row or item.id, raw_description=item.source_allocation_description,
-            raw_values=json.dumps({"article": item.article, "product": item.name, "size": item.size, "quantity": item.quantity}, ensure_ascii=False),
-            reason="Product was saved without a customer; assign it before customer accounting",
-        ))
+    except item_service.ItemRuleError as exc:
+        db.rollback()
+        raise HTTPException(409 if isinstance(exc, item_service.StaleItemError) else 422, str(exc)) from None
     db.commit()
     return RedirectResponse(f"/orders/{item.order.id}?saved={item.id}", status_code=303)
 

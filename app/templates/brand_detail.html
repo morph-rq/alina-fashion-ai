@@ -51,7 +51,7 @@
   <td><select name="ready_batch_id" form="item-{{ item.id }}"><option value="">Not ready</option>{% for batch in ready_batches %}<option value="{{ batch.id }}" {{ 'selected' if item.ready_batch_id == batch.id else '' }}>{{ batch.name }}</option>{% endfor %}</select></td>
   <td><select name="shipment_id" form="item-{{ item.id }}"><option value="">None</option>{% for shipment in shipments %}<option value="{{ shipment.id }}" {{ 'selected' if item.shipment_id == shipment.id else '' }}>{{ shipment.name }}</option>{% endfor %}</select></td>
   <td class="text"><small>{{ item.source_file or '-' }}{% if item.image_source_filename %}<br>Source attachment: {{ item.image_source_filename }}{% endif %}<br>{{ item.source_sheet or '-' }} row {{ item.source_row or '-' }}<br>{{ item.source_allocation_description or 'default customer context' }}</small></td>
-  <td><form id="item-{{ item.id }}" action="/items/{{ item.id }}" method="post"><input type="hidden" name="source_user" value="web user"><button class="button small-button" type="submit">Save</button></form></td>
+  <td><form id="item-{{ item.id }}" action="/items/{{ item.id }}" method="post"><input type="hidden" name="source_user" value="web user"><input type="hidden" name="revision" value="{{ item.revision }}">{% if item.ready_batch_id or item.shipment_link %}<input name="correction_reason" maxlength="500" placeholder="Reason if changing qty/price/customer" aria-label="Correction reason" class="correction-reason">{% endif %}<button class="button small-button" type="submit">Save</button></form></td>
 </tr>
 {% endfor %}
 </tbody></table></div></section>

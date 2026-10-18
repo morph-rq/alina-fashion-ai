@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app import item_service
 from app.calculations import ZERO, money
 from app.database import get_db
 from app.models import (Customer, Distributor, OrderItem, PurchaseGroup, Season,
@@ -115,34 +116,33 @@ def install_worksheet(app, templates, context):
                     note: str = Form(''), name: str | None = Form(None), article: str | None = Form(None),
                     color: str | None = Form(None), size: str | None = Form(None), quantity: int | None = Form(None),
                     wholesale: str | None = Form(None), selling: str | None = Form(None), markup: str | None = Form(None),
-                    return_review: str = Form(''), db=Depends(get_db)):
+                    return_review: str = Form(''), revision: str = Form(''), correction_reason: str = Form(''),
+                    db=Depends(get_db)):
         item = find(db, OrderItem, item_id)
-        new_price = amount_value(wholesale,'Wholesale price') if wholesale and wholesale.strip() else None
-        new_selling = amount_value(selling,'Selling override') if selling and selling.strip() else None
-        new_markup = amount_value(markup,'Markup') / 100 if markup is not None else None
-        if new_markup is not None and new_markup > 1:
-            raise HTTPException(422,'Markup cannot exceed 100%.')
-        if quantity is not None and (quantity < 0 or quantity > 1000000):
-            raise HTTPException(422,'Quantity must be between 0 and 1,000,000.')
         if state not in STATUS_LABELS:
             raise HTTPException(422, 'Choose a valid worksheet status.')
-        customer = find(db, Customer, int(customer_id)) if customer_id.isdigit() else None
-        if customer_id and not customer:
+        if customer_id and not customer_id.isdigit():
             raise HTTPException(422, 'Choose a valid customer.')
-        if item.customer_id != (customer.id if customer else None):
-            if db.scalar(select(SellerCreditAccount.id).where(SellerCreditAccount.item_id == item.id)):
-                raise HTTPException(422, 'This product has a seller-credit history. Its customer cannot be changed.')
-            item.customer_id = customer.id if customer else None
-            item.allocation_status = 'Allocated' if customer else 'Review'
-        previous = item.worksheet_status
-        for field,value in [('name',name),('article',article),('color',color),('size',size)]:
-            if value is not None: setattr(item,field,value.strip() or None)
-        if quantity is not None: item.quantity = quantity
-        if wholesale is not None: item.wholesale_unit_price = new_price
-        if selling is not None: item.selling_unit_price = new_selling
-        if new_markup is not None: item.markup_percentage = new_markup
-        item.worksheet_status, item.worksheet_note = state, note.strip() or None
-        audit(db, 'OrderItem', item.id, f'Worksheet status {previous} → {state}; customer {item.customer_id}. {note}')
+        try:
+            values = {'customer_id': int(customer_id) if customer_id else None,
+                      'worksheet_status': state, 'worksheet_note': note}
+            for field, value in [('name', name), ('article', article), ('color', color), ('size', size)]:
+                if value is not None:
+                    values[field] = value
+            if quantity is not None:
+                values['quantity'] = quantity
+            if wholesale is not None:
+                values['wholesale_unit_price'] = item_service.parse_money(wholesale, 'Wholesale price', optional=True)
+            if selling is not None:
+                values['selling_unit_price'] = item_service.parse_money(selling, 'Selling override', optional=True)
+            if markup is not None:
+                values['markup_percentage'] = item_service.parse_percent(markup)
+            item_service.change_item(db, item, values, actor='Worksheet', channel='worksheet editor',
+                                     expected_revision=int(revision) if revision.isdigit() else None,
+                                     reason=correction_reason)
+        except item_service.ItemRuleError as exc:
+            db.rollback()
+            raise HTTPException(409 if isinstance(exc, item_service.StaleItemError) else 422, str(exc)) from None
         db.commit()
         if re.fullmatch(r'(import|allocation)-\d+',return_review):
             kind,identity = return_review.split('-')

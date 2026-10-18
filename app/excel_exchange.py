@@ -21,6 +21,8 @@ from app.config import ROOT_DIR
 from app.database import get_db
 from app.models import Brand, BrandSeasonRule, Customer, ImportBatch, Order, OrderItem, PurchaseGroup, SellerCreditAccount
 from app.models import Season
+from app import item_service
+from app.item_service import is_operational
 from app.worksheet import STATUS_LABELS, audit, status_of
 
 EXCHANGE_DIR = ROOT_DIR / 'data' / 'excel-exchange'
@@ -29,6 +31,8 @@ HEADERS = ['ID', 'Season', 'Brand', 'Customer code', 'Customer name', 'Article /
            'Worksheet status', 'Group ID', 'Note', 'Distributor (reference)', 'Seller (reference)',
            'Shipment (reference)', 'Source (reference)', 'Final unit EUR (calculated)', 'Product total EUR (calculated)']
 EDITABLE = HEADERS[:16]
+# Edits that change posted liabilities of a Ready/shipped row.
+OPERATIONAL_COLUMNS = {'Customer code', 'Quantity', 'Wholesale unit EUR', 'Markup %', 'Selling unit override EUR'}
 COLORS = {'In process': 'FFF2B3', 'Done': 'D9EEDB', 'Not completed': 'FFFFFF'}
 
 
@@ -257,6 +261,10 @@ def inspect_upload(db, content):
                 if changing_group and group and db.scalar(select(SellerCreditAccount.id).where(SellerCreditAccount.group_id == group.id)):
                     raise ValueError('The destination group has seller-credit history. Create a new group for these products.')
                 changed = [dict(field=k,before=original[k],after=data[k]) for k in EDITABLE if original and data[k] != original[k]]
+                operational_edits = {c['field'] for c in changed} & OPERATIONAL_COLUMNS
+                if item and operational_edits and is_operational(item):
+                    raise ValueError('This product is Ready or shipped; change ' + ', '.join(sorted(operational_edits))
+                                     + ' in the product editor, where the correction reason is recorded.')
                 warnings = []
                 for key,label in [('Customer code','customer allocation'),('Size','size'),('Wholesale unit EUR','cost price'),('Group ID','shipment group')]:
                     if not data[key]: warnings.append(f'Confirm {label} after import')
@@ -290,21 +298,28 @@ def apply_upload(db, content, source_path):
                 db.add(BrandSeasonRule(season_id=season.id,brand_id=brand.id,markup_percentage=Decimal(data['Markup %'])/100))
             if not order:
                 order = Order(season_id=season.id,brand_id=brand.id); db.add(order); db.flush()
-            item = OrderItem(order_id=order.id,source_file=str(source_path),source_sheet='Orders',source_row=row['row'],status='Ordered')
-            db.add(item)
         customer = db.scalar(select(Customer).where(Customer.code == data['Customer code'])) if data['Customer code'] else None
         if data['Customer code'] and not customer:
             customer = Customer(code=data['Customer code'],name=data['Customer name']); db.add(customer); db.flush()
-        item.customer_id = customer.id if customer else None
-        item.allocation_status = 'Allocated' if customer else 'Review'
+        values = {'customer_id': customer.id if customer else None,
+                  'quantity': int(data['Quantity']),
+                  'wholesale_unit_price': Decimal(data['Wholesale unit EUR']) if data['Wholesale unit EUR'] else None,
+                  'selling_unit_price': Decimal(data['Selling unit override EUR']) if data['Selling unit override EUR'] else None,
+                  'markup_percentage': Decimal(data['Markup %'])/100,
+                  'worksheet_status': next(k for k,v in STATUS_LABELS.items() if v == data['Worksheet status']),
+                  'purchase_group_id': int(data['Group ID']) if data['Group ID'] else None}
         for field,key in [('article','Article / SKU'),('name','Product'),('color','Color'),('size','Size'),('worksheet_note','Note')]:
-            setattr(item,field,data[key] or None)
-        item.quantity = int(data['Quantity'])
-        item.wholesale_unit_price = Decimal(data['Wholesale unit EUR']) if data['Wholesale unit EUR'] else None
-        item.selling_unit_price = Decimal(data['Selling unit override EUR']) if data['Selling unit override EUR'] else None
-        item.markup_percentage = Decimal(data['Markup %'])/100
-        item.worksheet_status = next(k for k,v in STATUS_LABELS.items() if v == data['Worksheet status'])
-        item.purchase_group_id = int(data['Group ID']) if data['Group ID'] else None
+            values[field] = data[key] or None
+        try:
+            if item is None:
+                item = item_service.create_item(db, order, values, actor='Editable Excel', channel='Editable Excel',
+                                                source_file=str(source_path), source_sheet='Orders').item
+                item.source_row = row['row']
+            else:
+                item_service.change_item(db, item, values, actor='Editable Excel', channel='Editable Excel',
+                                         allow_operational_changes=False)
+        except item_service.ItemRuleError as exc:
+            raise ValueError(f'Row {row["row"]}: {exc}') from None
         db.flush()
         audit(db,'OrderItem',item.id,'Editable Excel: '+json.dumps(row,ensure_ascii=False))
     db.add(ImportBatch(filename=source_path.name,sha256=result['digest'],stored_path=str(source_path),

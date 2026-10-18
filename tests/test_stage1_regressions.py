@@ -179,3 +179,30 @@ def test_startup_backfill_never_overrides_a_reviewed_allocation(monkeypatch):
         assert item.allocation_status == 'Allocated'
         assert session.scalar(select(func.count()).select_from(AllocationReview).where(AllocationReview.status == 'Open')) == 0
     Base.metadata.drop_all(database.engine)
+
+
+def test_ready_import_reversal_is_blocked_by_payments_and_otherwise_frees_the_file(db, tmp_path):
+    from app.models import ImportBatch, PaymentAllocation
+    from app.workspace_reset import ready_import_reversal_blockers, reverse_ready_import
+    item = _item(db, quantity=2, size='M')
+    path = _ready_book(tmp_path, [['0451', 'MI', 'M', 1]])
+    summary = process_ready_workbook(db, path, 'Ready 1', None, 'FW26')
+    db.commit()
+    batch = db.scalar(select(ImportBatch))
+    payment = Payment(season_id=item.order.season_id, customer_id=item.customer_id, date=date(2026, 9, 1), amount=D('10'))
+    db.add(payment)
+    db.flush()
+    allocation = PaymentAllocation(payment_id=payment.id, ready_batch_id=summary['ready_batch_id'], stage='ready', amount=D('10'))
+    db.add(allocation)
+    db.flush()
+    assert ready_import_reversal_blockers(db, batch)[1]
+    with pytest.raises(ValueError):
+        reverse_ready_import(db, batch, 'Wrong supplier list uploaded')
+    db.delete(allocation)
+    db.flush()
+    assert reverse_ready_import(db, batch, 'Wrong supplier list uploaded') == 1
+    db.commit()
+    assert all(row.ready_batch_id is None for row in db.scalars(select(OrderItem)).all())
+    assert sum(row.quantity for row in db.scalars(select(OrderItem)).all()) == 2
+    again = process_ready_workbook(db, path, 'Ready 1b', None, 'FW26')
+    assert again['already_imported'] is False and again['assigned_units'] == 1

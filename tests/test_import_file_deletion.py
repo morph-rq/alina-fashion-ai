@@ -119,15 +119,25 @@ def test_reset_all_removes_database_records_and_managed_files_only(tmp_path: Pat
     app.dependency_overrides[get_db] = override_db
     client = TestClient(app)
     try:
-        rejected = client.post("/imports/reset-all", data={"confirmation": "DELETE"}, follow_redirects=False)
+        preview = client.get("/workspace/reset")
+        assert preview.status_code == 200
+        assert "audit history" in preview.text and "audit_logs: 1" in preview.text and "customers: 1" in preview.text
+        assert client.post("/imports/reset-all", data={"confirmation": "DELETE ALL"}, follow_redirects=False).headers["location"] == "/workspace/reset"
+        rejected = client.post("/workspace/reset", data={"confirmation": "DELETE ALL"}, follow_redirects=False)
         assert rejected.status_code == 422
         assert all(path.exists() for path in managed_files)
 
-        response = client.post("/imports/reset-all", data={"confirmation": "DELETE ALL"}, follow_redirects=False)
+        response = client.post("/workspace/reset", data={"confirmation": "RESET WORKSPACE"}, follow_redirects=False)
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 303
+    snapshots = list((tmp_path / "backups" / "recovery").glob("snapshot-*.zip"))
+    assert len(snapshots) == 1 and snapshots[0].name in response.headers["location"]
+    from app.recovery import restore_snapshot
+    restored = restore_snapshot(snapshots[0], tmp_path / "restore-check")
+    assert restored["table_counts"]["customers"] == 1 and restored["table_counts"]["audit_logs"] == 1
+    assert (tmp_path / "restore-check" / "data" / "imports" / "master" / "batch-1" / "supplier.xlsx").exists()
     assert outside.exists()
     assert all(not path.exists() for path in managed_files)
     assert not any((tmp_path / "data" / "imports").iterdir())

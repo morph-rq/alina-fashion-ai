@@ -1773,41 +1773,54 @@ def delete_import_source(batch_id: int, confirmation: str = Form(...), db: Sessi
     return RedirectResponse(f"/import?source_deleted={batch.id}", status_code=303)
 
 
-def _clear_managed_directory(path: Path) -> None:
-    project_root = ROOT_DIR.resolve()
-    resolved = path.resolve()
+def _reset_page(request: Request, db: Session, **values):
+    from app import workspace_reset
+    ready_imports = []
+    for batch in db.scalars(select(ImportBatch).order_by(ImportBatch.id.desc())).all():
+        summary = json.loads(batch.summary_json or "{}")
+        if summary.get("ready_batch_id") and not summary.get("reversed"):
+            ready, blockers = workspace_reset.ready_import_reversal_blockers(db, batch)
+            ready_imports.append({"batch": batch, "ready": ready, "blockers": blockers})
+    return templates.TemplateResponse(request, "workspace_reset.html", context(
+        request, scope=workspace_reset.reset_scope(db, ROOT_DIR), phrase=workspace_reset.RESET_PHRASE,
+        ready_imports=ready_imports, **values), status_code=422 if values.get("error") else 200)
+
+
+@app.get("/workspace/reset", response_class=HTMLResponse)
+def workspace_reset_page(request: Request, db: Session = Depends(get_db)):
+    return _reset_page(request, db, snapshot=request.query_params.get("snapshot"))
+
+
+@app.post("/workspace/reset")
+def reset_workspace_route(request: Request, confirmation: str = Form(...), db: Session = Depends(get_db)):
+    from app import workspace_reset
     try:
-        resolved.relative_to(project_root)
+        snapshot = workspace_reset.reset_workspace(db, confirmation, ROOT_DIR)
     except ValueError as exc:
-        raise RuntimeError(f"Refusing to clear unmanaged path: {resolved}") from exc
-    resolved.mkdir(parents=True, exist_ok=True)
-    for child in resolved.iterdir():
-        if child.is_dir():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+        db.rollback()
+        return _reset_page(request, db, error=str(exc))
+    return RedirectResponse(f"/workspace/reset?snapshot={snapshot.path.name}", status_code=303)
 
 
 @app.post("/imports/reset-all")
-def reset_all_imported_data(confirmation: str = Form(...), db: Session = Depends(get_db)):
-    if confirmation.strip() != "DELETE ALL":
-        raise HTTPException(422, "Type DELETE ALL exactly to confirm the reset")
+def reset_all_imported_data():
+    # The old label suggested only imports were affected. Reset now has an explicit scope page.
+    return RedirectResponse("/workspace/reset", status_code=303)
 
+
+@app.post("/imports/{batch_id}/reverse-ready")
+def reverse_ready_import_route(request: Request, batch_id: int, reason: str = Form(...), db: Session = Depends(get_db)):
+    from app import workspace_reset
+    batch = db.get(ImportBatch, batch_id)
+    if batch is None:
+        raise HTTPException(404, "Import not found")
     try:
-        for table in reversed(Base.metadata.sorted_tables):
-            db.execute(table.delete())
-        db.commit()
-    except Exception:
+        workspace_reset.reverse_ready_import(db, batch, reason)
+    except ValueError as exc:
         db.rollback()
-        raise
-
-    _clear_managed_directory(ROOT_DIR / "data" / "imports")
-    _clear_managed_directory(ROOT_DIR / "data" / "images")
-    _clear_managed_directory(ROOT_DIR / "data" / "staged-images")
-    _clear_managed_directory(ROOT_DIR / "data" / "library")
-    _clear_managed_directory(ROOT_DIR / "data" / "reports")
-    _clear_managed_directory(ROOT_DIR / "output" / "pdf")
-    return RedirectResponse("/import?reset=complete", status_code=303)
+        return _reset_page(request, db, error=str(exc))
+    db.commit()
+    return RedirectResponse("/workspace/reset?reversed=1", status_code=303)
 
 
 @app.get("/reports/download/{filename}")

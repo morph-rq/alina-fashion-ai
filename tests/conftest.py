@@ -1,6 +1,31 @@
-"""Keep background storage work out of the user's local backup history."""
+"""Test isolation.
+
+Settings are read from the workspace .env when ``app.config`` is first imported, so
+credentials, the development database and live AI/search endpoints are neutralised
+here, before any test module imports the application.
+"""
 import asyncio
-import pytest
+import os
+import tempfile
+from pathlib import Path
+
+_ISOLATED_DB = Path(tempfile.mkdtemp(prefix='fashion-tests-')) / 'unused.db'
+os.environ.update({
+    'FASHION_DATABASE_URL': f'sqlite:///{_ISOLATED_DB.as_posix()}',
+    'FASHION_APP_USERNAME': '',
+    'FASHION_APP_PASSWORD': '',
+    'FASHION_AI_API_KEY': '',
+    'FASHION_GEMINI_API_KEY': '',
+    'FASHION_GOOGLE_CSE_API_KEY': '',
+    'FASHION_GOOGLE_CSE_ID': '',
+    'FASHION_SEARXNG_URL': '',
+    'FASHION_GOOGLE_CLIENT_ID': '',
+    'FASHION_GOOGLE_CLIENT_SECRET': '',
+    'FASHION_RECOVERY_PASSPHRASE': '',
+    'FASHION_BACKGROUND_WORKER': '0',
+})
+
+import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

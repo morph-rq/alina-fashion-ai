@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     google_cse_api_key: str = ""
     google_cse_id: str = ""
     searxng_url: str = "http://127.0.0.1:8888"
+    # Durable background jobs (analysis, sync, backups). Disable only for tests or one-off scripts.
+    background_worker: bool = True
     model_config = SettingsConfigDict(env_prefix="FASHION_", env_file=".env")
 
     @property

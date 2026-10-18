@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Saved · {{ session.title }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<section class="page-head"><div><p class="eyebrow">Saved once · receipt {{ key[:8] }}</p><h1>{{ session.title }}</h1>
+<p>Saved {{ receipt.saved_at[:19].replace('T', ' ') }} UTC. Downloading files below never saves or changes records again, so a failed download can simply be retried.</p></div>
+<a class="button" href="/intake/{{ session.public_id }}">Back to the intake</a></section>
+<section class="two-col top-align">
+<article class="panel"><h2>What was saved</h2>
+<table class="data-table"><thead><tr><th>Row</th><th>Action</th><th>Record</th><th>Details</th></tr></thead><tbody>
+{% for row in receipt.rows %}<tr><td>{{ row.row }}</td><td>{{ row.action }}</td>
+<td>{% if row.item_id %}<a href="/worksheet/items/{{ row.item_id }}">product #{{ row.item_id }}</a>{% elif row.payment_id %}payment #{{ row.payment_id }}{% endif %}</td>
+<td class="text">{% if row.line_value %}line value {{ row.line_value }} {{ currency }}{% endif %}{% for change in row.changes or [] %}{{ change.field }}: {{ change.before }} → {{ change.after }}{% if not loop.last %}; {% endif %}{% endfor %}{% if row.amount %}{{ row.type }} {{ row.amount }} {{ currency }}{% endif %}{% for note in row.notes or [] %}<br>{{ note }}{% endfor %}</td></tr>{% endfor %}
+</tbody></table>
+<h2>Customer balances</h2>
+<table class="data-table"><thead><tr><th>Customer</th><th>Ordered before → after</th><th>Charged before → after</th><th>Outstanding before → after</th></tr></thead><tbody>
+{% for customer_id, after in receipt.after.items() %}{% set before = receipt.before.get(customer_id, {}) %}<tr><td>#{{ customer_id }}</td>
+<td>{{ before.ordered or '0.00' }} → {{ after.ordered }}</td><td>{{ before.charged or '0.00' }} → {{ after.charged }}</td><td>{{ before.outstanding or '0.00' }} → {{ after.outstanding }}</td></tr>{% endfor %}
+</tbody></table></article>
+<article class="panel"><h2>Downloads</h2>
+<p><a class="button primary" id="excel-download" href="/exports/seasons/{{ session.season_id }}.xlsx">Season workbook (Products, brand views, summary)</a></p>
+<p><a class="button" href="/exports/business.xlsx">Whole business workbook</a> <a class="button" href="/excel/download">Editable order workbook</a></p>
+<h3>Private customer files</h3>
+{% for customer_id in receipt.after %}<p>Customer #{{ customer_id }}: <a href="/reports/customers/{{ customer_id }}/pdf?season={{ session.season.name|urlencode }}">statement PDF</a> · <a href="/exports/customers/{{ customer_id }}.xlsx?season={{ session.season.name|urlencode }}">customer workbook</a></p>{% endfor %}
+</article></section>
+{% if auto_download %}<script>window.addEventListener('load', function () { document.getElementById('excel-download').click(); });</script>{% endif %}
+{% endblock %}

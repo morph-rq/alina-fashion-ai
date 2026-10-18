@@ -61,6 +61,7 @@ from app.models import (
 from app.pdf_report import build_all_customer_pdfs, build_customer_pdf
 from app.pricing import wholesale_from_final
 from app import item_service
+from app.drafts import FIELD_LABELS
 from app.operations import operations_inbox
 from app.ready_importer import process_ready_workbook
 from app.schemas import DashboardSummary, ValidationReportSchema
@@ -88,15 +89,22 @@ STATUSES = [
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
-    worker = asyncio.create_task(backup_worker())
+    workers = [asyncio.create_task(backup_worker())]
+    if settings.background_worker:
+        from app import jobs
+        from app.database import SessionLocal
+        # Pending jobs live in the database; this loop resumes them after a restart.
+        workers.append(asyncio.create_task(jobs.worker_loop(SessionLocal)))
     try:
         yield
     finally:
-        worker.cancel()
-        try:
-            await worker
-        except asyncio.CancelledError:
-            pass
+        for worker in workers:
+            worker.cancel()
+        for worker in workers:
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -177,6 +185,7 @@ def context(request: Request, **kwargs):
         "currency": settings.currency,
         "statuses": STATUSES,
         "brand_suggestions": BRAND_SUGGESTIONS,
+        "labels": FIELD_LABELS,
         **kwargs,
     }
 
@@ -2238,3 +2247,7 @@ install_source_reviews(app, templates, context)
 install_intake_sources(app, templates, context)
 install_worksheet(app, templates, context)
 install_storage(app, templates, context)
+from app.intake_routes import install_intake
+install_intake(app, templates, context)
+from app.inbox_routes import install_inbox
+install_inbox(app, templates, context)

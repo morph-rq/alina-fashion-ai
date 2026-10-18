@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Source inbox · {{ app_name }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<section class="page-head"><div><p class="eyebrow">Uploads · Google Drive · e-mail</p><h1>Source inbox</h1>
+<p>Every piece of evidence is listed with its state. Captured means the original is stored; applied means a saved operation used it. Nothing is deleted from here.</p></div>
+<div><a class="button" href="/intake">Intake</a> <a class="button" href="/connections">Connections</a></div></section>
+<nav class="wb-tabs"><a href="/inbox">All</a>{% for name in states %}<a href="/inbox?state={{ name }}">{{ name.replace('_', ' ') }} ({{ counts.get(name, 0) }})</a>{% endfor %}</nav>
+{% if failed_jobs %}<section class="panel"><h2>Background work that stopped</h2>
+{% for job in failed_jobs %}<form action="/inbox/jobs/{{ job.id }}/retry" method="post"><strong>{{ job.kind }}</strong> after {{ job.attempts }} attempt(s): {{ job.last_error }} <button class="button small-button">Retry</button></form>{% endfor %}</section>{% endif %}
+<section class="panel"><table class="data-table"><thead><tr><th>Received</th><th>Channel</th><th>Source</th><th>State</th><th>Actions</th></tr></thead><tbody>
+{% for item in items %}{% set meta = metadata[item.id] %}<tr>
+<td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') if item.created_at }}</td><td>{{ item.channel }}{% if item.account %}<br><small>{{ item.account }}</small>{% endif %}</td>
+<td class="text"><strong>{{ item.original_name or item.remote_id }}</strong>{% if meta.subject %}<br>{{ meta.subject }}{% endif %}{% if meta.sender %}<br><small>from {{ meta.sender }}</small>{% endif %}
+{% for child in children.get(item.id, []) %}<br><small>↳ {{ child.original_name }} <span class="state state-{{ child.state }}">{{ child.state }}</span>{% if child.state_reason %} {{ child.state_reason }}{% endif %}</small>{% endfor %}
+{% if item.source_link %}<br><a href="{{ item.source_link }}" rel="noopener noreferrer" target="_blank">open at source</a>{% endif %}</td>
+<td><span class="state state-{{ item.state }}">{{ item.state.replace('_', ' ') }}</span>{% if item.state_reason %}<br><small>{{ item.state_reason }}</small>{% endif %}</td>
+<td>{% if item.session_id %}<form action="/inbox/{{ item.id }}/intake" method="post"><button class="button small-button">Open intake</button></form>{% elif item.state not in ('applied', 'ignored') %}<form action="/inbox/{{ item.id }}/intake" method="post"><button class="button small-button">Review in intake</button></form>
+<form action="/inbox/{{ item.id }}/ignore" method="post"><input name="reason" placeholder="Reason to ignore" required minlength="5"><button class="button small-button">Ignore</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5">No sources yet.</td></tr>{% endfor %}</tbody></table></section>
+<section class="panel"><h2>Background queue</h2>{% if queue %}<ul>{% for kind, states in queue.items() %}<li>{{ kind }}: {% for name, count in states.items() %}{{ name }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>{% else %}<p class="muted">No background work recorded.</p>{% endif %}
+<p class="muted">Background work runs only while the app is running. After a stop it resumes from the recorded queue at the next start.</p></section>
+{% endblock %}

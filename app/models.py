@@ -443,4 +443,157 @@ class LibraryFile(Base):
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+# --- Durable intake: unified source inbox, drafts, questions and receipts ---------
+
+class SourceBlob(Base):
+    """Content-addressed stored bytes. One row per distinct content hash."""
+    __tablename__ = "source_blobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    media_type: Mapped[str] = mapped_column(String(150))
+    storage_path: Mapped[str] = mapped_column(String(500), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SourceItem(Base):
+    """One piece of evidence in the inbox, whatever channel it arrived through.
+
+    Identity is (channel, account, remote id, remote version), so a replayed Drive
+    change or Gmail message is recognised. The same bytes arriving by two
+    channels are two SourceItems sharing one SourceBlob: provenance stays
+    separate and nothing about business identity is implied.
+    """
+    __tablename__ = "source_items"
+    __table_args__ = (UniqueConstraint("channel", "account", "remote_id", "remote_version", name="uq_source_identity"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20), index=True)  # upload | text | drive | gmail
+    account: Mapped[str] = mapped_column(String(200), default="")
+    remote_id: Mapped[str] = mapped_column(String(300))
+    remote_version: Mapped[str] = mapped_column(String(200), default="")
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("source_items.id"), index=True)  # attachment -> message
+    blob_id: Mapped[int | None] = mapped_column(ForeignKey("source_blobs.id"), index=True)
+    original_name: Mapped[str] = mapped_column(String(500), default="")
+    media_type: Mapped[str] = mapped_column(String(150), default="application/octet-stream")
+    source_link: Mapped[str | None] = mapped_column(String(1000))
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    state: Mapped[str] = mapped_column(String(30), default="captured", index=True)
+    state_reason: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("intake_sessions.id"), index=True)
+    remote_modified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    blob: Mapped[SourceBlob | None] = relationship()
+    session: Mapped[IntakeSession | None] = relationship(back_populates="sources")
+
+
+class IntakeSession(Base):
+    __tablename__ = "intake_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(200), default="New intake")
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id"), index=True)
+    action: Mapped[str] = mapped_column(String(40), default="add_goods")
+    state: Mapped[str] = mapped_column(String(30), default="collecting", index=True)
+    state_reason: Mapped[str | None] = mapped_column(Text)
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    season: Mapped[Season | None] = relationship()
+    messages: Mapped[list[IntakeMessage]] = relationship(back_populates="session", order_by="IntakeMessage.id", cascade="all, delete-orphan")
+    rows: Mapped[list[DraftRow]] = relationship(back_populates="session", order_by="DraftRow.position", cascade="all, delete-orphan")
+    questions: Mapped[list[DraftQuestion]] = relationship(back_populates="session", order_by="DraftQuestion.id", cascade="all, delete-orphan")
+    sources: Mapped[list[SourceItem]] = relationship(back_populates="session", order_by="SourceItem.id")
+
+
+class IntakeMessage(Base):
+    __tablename__ = "intake_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("intake_sessions.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20))  # operator | assistant | system
+    text: Mapped[str] = mapped_column(Text, default="")
+    source_item_ids: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    session: Mapped[IntakeSession] = relationship(back_populates="messages")
+
+
+class DraftRow(Base):
+    """A proposed new product row or a correction to an existing one.
+
+    ``fields_json`` maps field name to {value, state, origin, evidence, candidates,
+    history}. State is explicit, defaulted, suggested, missing, conflicting or
+    confirmed (set by the operator).
+    """
+    __tablename__ = "draft_rows"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("intake_sessions.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(String(30), default="new_item")  # new_item | update_item
+    target_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"), index=True)
+    target_revision: Mapped[int | None] = mapped_column(Integer)
+    fields_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft | committed | excluded
+    committed_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"))
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    __mapper_args__ = {"version_id_col": revision}
+    session: Mapped[IntakeSession] = relationship(back_populates="rows")
+
+
+class DraftQuestion(Base):
+    __tablename__ = "draft_questions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("intake_sessions.id"), index=True)
+    draft_row_id: Mapped[int | None] = mapped_column(ForeignKey("draft_rows.id"), index=True)
+    field: Mapped[str] = mapped_column(String(60))
+    key: Mapped[str] = mapped_column(String(120), index=True)  # stable identity: row:field:reason
+    text: Mapped[str] = mapped_column(Text)
+    options_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(20), default="open")  # open | answered | resolved | dismissed
+    answer_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session: Mapped[IntakeSession] = relationship(back_populates="questions")
+
+
+class OperationReceipt(Base):
+    """Result of an idempotent business operation; a retry returns this record."""
+    __tablename__ = "operation_receipts"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("intake_sessions.id"), index=True)
+    session_revision: Mapped[int | None] = mapped_column(Integer)
+    result_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Job(Base):
+    """Durable background work. The table, not memory, is the record of pending work."""
+    __tablename__ = "jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(60), index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    dedupe_key: Mapped[str | None] = mapped_column(String(200), unique=True)
+    state: Mapped[str] = mapped_column(String(20), default="queued", index=True)  # queued | running | done | dead
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=6)
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    claimed_by: Mapped[str | None] = mapped_column(String(100))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class WorkerLease(Base):
+    """Single-owner lease so only one worker process drains the queue."""
+    __tablename__ = "worker_leases"
+    name: Mapped[str] = mapped_column(String(60), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(100))
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 ModelDict = dict[str, Any]

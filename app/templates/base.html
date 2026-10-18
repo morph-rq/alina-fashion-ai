@@ -25,6 +25,7 @@
         <div class="nav-primary" aria-label="Everyday tasks">
           <a class="{{ 'active' if request.url.path == '/' else '' }}" href="/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5L12 4l8 6.5V20H4zM9 20v-6h6v6"/></svg><span>Home</span></a>
           <a class="{{ 'active' if request.url.path.startswith('/operations') else '' }}" href="/operations"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14v14H5zM8 9h8M8 13h5"/></svg><span>To-do</span></a>
+          <a class="{{ 'active' if request.url.path.startswith('/intake') or request.url.path.startswith('/inbox') else '' }}" href="/intake"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v10H8l-4 4zM8 9h8M8 12h5"/></svg><span>Intake</span></a>
           <a class="nav-add {{ 'active' if request.url.path == '/manual-entry' else '' }}" href="/manual-entry"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add order</span></a>
           <a class="{{ 'active' if request.url.path.startswith('/orders') or request.url.path.startswith('/brands') else '' }}" href="/orders"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4"/></svg><span>Orders</span></a>
           <a class="{{ 'active' if request.url.path.startswith('/customers') else '' }}" href="/customers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5.5 20c.7-4 2.8-6 6.5-6s5.8 2 6.5 6"/></svg><span>Customers</span></a>

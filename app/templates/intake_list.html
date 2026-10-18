@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Intake · {{ app_name }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<section class="page-head"><div><p class="eyebrow">Upload · describe · answer · save once</p><h1>Intake</h1>
+<p>Start with photos, screenshots, PDFs, spreadsheets, voice notes or a message. Every draft is kept on the server, so you can close the page and continue later.</p></div>
+<a class="button" href="/inbox">Source inbox</a></section>
+<section class="two-col top-align">
+  <article class="panel"><h2>New intake</h2>
+  {% if seasons %}
+  <form class="stack-form" action="/intake" method="post" enctype="multipart/form-data">
+    <label>Season<select name="season_id" required>{% for season in seasons %}<option value="{{ season.id }}">{{ season.name }}</option>{% endfor %}</select></label>
+    <label>Title (optional)<input name="title" maxlength="200" placeholder="e.g. Maria — The Row coat"></label>
+    <label>Message<textarea name="message" rows="4" placeholder="Maria Ivanova, The Row, black coat, 38, 1200"></textarea></label>
+    <label>Attachments<input type="file" name="attachments" multiple accept="image/*,application/pdf,.xlsx,.xlsm,.csv,.txt,audio/*"></label>
+    <button class="button primary">Start</button>
+    {% if not ai_configured %}<small class="muted">AI extraction is not configured on this installation. Sources are still stored and you can fill the draft table by hand.</small>{% endif %}
+  </form>
+  {% else %}<p>Create a season first.</p><a class="button" href="/seasons/new">New season</a>{% endif %}
+  </article>
+  <article class="panel"><h2>Continue where you left off</h2>
+  <table class="data-table"><thead><tr><th>Intake</th><th>Season</th><th>State</th><th>Rows</th><th>Updated</th></tr></thead><tbody>
+  {% for item in sessions %}<tr><td class="text"><a href="/intake/{{ item.public_id }}">{{ item.title }}</a></td><td>{{ item.season.name if item.season else '-' }}</td>
+  <td><span class="state state-{{ item.state }}">{{ item.state.replace('_', ' ') }}</span></td><td>{{ item.rows|selectattr('status', 'ne', 'excluded')|list|length }}</td><td>{{ item.updated_at.strftime('%Y-%m-%d %H:%M') if item.updated_at }}</td></tr>
+  {% else %}<tr><td colspan="5">No intakes yet.</td></tr>{% endfor %}</tbody></table>
+  </article>
+</section>
+{% endblock %}

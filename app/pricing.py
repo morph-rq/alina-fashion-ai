@@ -42,3 +42,55 @@ def wholesale_from_final(final: Decimal, markup: Decimal) -> ReversePrice:
         reason=(f"No wholesale price in whole cents gives exactly {final} at {markup * 100:.0f}% markup; "
                 f"the stated final is kept as the selling price and the wholesale {estimate} is derived."),
     )
+
+
+CURRENCY_MARKERS = {"€": "EUR", "EUR": "EUR", "EURO": "EUR", "EUROS": "EUR", "$": "USD", "USD": "USD", "£": "GBP",
+                    "GBP": "GBP", "CHF": "CHF", "₽": "RUB", "RUB": "RUB", "РУБ": "RUB"}
+
+
+@dataclass(frozen=True)
+class AmountReading:
+    amount: Decimal | None
+    currency: str | None
+    problem: str | None = None
+
+
+def parse_amount_text(text: str | None) -> AmountReading:
+    """Read an amount as written in a message, without guessing decimal locale.
+
+    "1.200,50" and "1,200.50" are unambiguous. "1.200" or "1,200" could mean
+    1200 or 1.2, so they are reported as ambiguous instead of being guessed.
+    """
+    import re
+    raw = (text or "").strip()
+    if not raw:
+        return AmountReading(None, None, "No amount was stated.")
+    upper = raw.upper()
+    currencies = {code for marker, code in CURRENCY_MARKERS.items() if marker in upper}
+    currency = next(iter(currencies)) if len(currencies) == 1 else None
+    if len(currencies) > 1:
+        return AmountReading(None, None, f"Several currencies appear in {raw!r}.")
+    numbers = re.findall(r"\d{1,3}(?:[\s'\u00a0\u202f]\d{3}(?!\d))+(?:[.,]\d+)?|\d[\d.,]*\d|\d", raw)
+    if len(numbers) != 1:
+        return AmountReading(None, currency, f"Could not find exactly one amount in {raw!r}.")
+    number = re.sub(r"[\s'\u00a0\u202f]", "", numbers[0])
+    if "." in number and "," in number:
+        decimal_mark = "." if number.rfind(".") > number.rfind(",") else ","
+        thousands = "," if decimal_mark == "." else "."
+        number = number.replace(thousands, "").replace(decimal_mark, ".")
+    elif "," in number or "." in number:
+        mark = "," if "," in number else "."
+        head, _, tail = number.rpartition(mark)
+        if number.count(mark) > 1:
+            number = number.replace(mark, "")  # 1.200.000 -> thousands only
+        elif len(tail) == 3:
+            return AmountReading(None, currency, f"{raw!r} could mean {head}{tail} or {head}.{tail}; state the amount without a thousands separator.")
+        else:
+            number = f"{head}.{tail}"
+    try:
+        amount = Decimal(number)
+    except Exception:  # noqa: BLE001 - reported as a reading problem
+        return AmountReading(None, currency, f"Could not read {raw!r} as an amount.")
+    if amount != money(amount):
+        return AmountReading(None, currency, f"{raw!r} has more than two decimals.")
+    return AmountReading(money(amount), currency)

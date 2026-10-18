@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}{{ session.title }} · Intake{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<div class="intake-head">
+  <div><p class="eyebrow">Intake · {{ session.season.name if session.season else 'no season' }} · saved automatically</p>
+  <h1>{{ session.title }}</h1>
+  <span class="state state-{{ session.state }}">{{ session.state.replace('_', ' ') }}</span>{% if session.state_reason %} <small>{{ session.state_reason }}</small>{% endif %}</div>
+  <div><a class="button" href="/intake">All intakes</a> <a class="button" href="/inbox">Source inbox</a></div>
+</div>
+{% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+{% if session.state == 'analysing' %}<meta http-equiv="refresh" content="5"><p class="notice">Analysing your sources… this page refreshes by itself. Your files are already stored.</p>{% endif %}
+<nav class="intake-tabs" aria-label="Intake sections"><a href="#conversation">Talk</a><a href="#draft">Draft</a><a href="#evidence">Evidence</a><a href="#review">Save</a></nav>
+<div class="intake-grid">
+  <section class="intake-pane" id="conversation" aria-label="Conversation">
+    <h2>Conversation</h2>
+    <div class="messages" aria-live="polite">
+      {% for message in session.messages %}<div class="message {{ message.role }}">{{ message.text }}</div>{% else %}<p class="muted">Describe what to record, or attach photos, screenshots, PDFs, spreadsheets or voice notes.</p>{% endfor %}
+    </div>
+    {% for question in questions %}
+    <form class="question" action="/intake/{{ session.public_id }}/questions/{{ question.id }}" method="post">
+      <p>{{ question.text }}</p>
+      {% if options[question.id] %}<div class="choices">{% for option in options[question.id] %}<button class="button small-button" name="choice" value="{{ loop.index0 }}">{{ option.label }}</button>{% endfor %}</div>{% endif %}
+      <div class="free"><input name="text" aria-label="Type an answer" placeholder="Or type the answer"><button class="button small-button">Answer</button></div>
+    </form>
+    {% endfor %}
+    {% if more_questions %}<p class="muted">{{ more_questions }} more question(s) after these.</p>{% endif %}
+    <form class="composer" action="/intake/{{ session.public_id }}/messages" method="post" enctype="multipart/form-data">
+      <label class="sr-only" for="intake-message">Message</label>
+      <textarea id="intake-message" name="message" placeholder="For example: Actually size 40 — or — Maria paid 650 on 2026-09-01"></textarea>
+      <div class="row"><input type="file" name="attachments" multiple accept="image/*,application/pdf,.xlsx,.xlsm,.csv,.txt,audio/*"><button class="button primary">Send</button></div>
+      <small class="muted">Files are stored before they are analysed. Text inside documents is treated as evidence, never as instructions.{% if not ai_configured %} AI extraction is not configured here; you can still fill the draft by hand.{% endif %}</small>
+    </form>
+  </section>
+
+  <section class="intake-pane" id="draft" aria-label="Draft table">
+    <h2>Draft</h2>
+    {% for view in views %}{% set row = view.row %}
+    <article class="draft-row {{ row.status }}" id="row-{{ row.id }}">
+      <header><strong>Row {{ row.position }} · {{ {'new_item': 'New product', 'update_item': 'Correction', 'payment': 'Payment'}[row.kind] }}</strong>
+        <span>{% if row.status == 'committed' %}<span class="state state-saved">saved{% if row.committed_item_id %} · #{{ row.committed_item_id }}{% endif %}</span>{% else %}
+        <form action="/intake/{{ session.public_id }}/rows/{{ row.id }}/exclude" method="post" style="display:inline"><button class="button small-button" title="Remove this row from the draft">Remove</button></form>{% endif %}</span></header>
+      {% if view.target %}<p>Saved product #{{ view.target.id }}: {{ view.target.order.brand.name }} {{ view.target.name or view.target.article }} · {{ view.target.customer.code if view.target.customer else '-' }}</p>{% endif %}
+      <form class="row-form" action="/intake/{{ session.public_id }}/rows/{{ row.id }}/fields" method="post" data-autosave>
+        <input type="hidden" name="expected_revision" value="{{ row.revision }}">
+        <div class="field-grid">
+        {% for name, field in view.fields.items() %}{% if row.kind != 'update_item' or field.state != 'missing' %}
+          <label for="f-{{ row.id }}-{{ name }}">{{ labels[name] if labels is defined else name.replace('_', ' ')|capitalize }}</label>
+          {% if row.status == 'draft' and name not in ('customer', 'order', 'image') %}
+            {% if name == 'price_meaning' %}<select id="f-{{ row.id }}-{{ name }}" name="field:{{ name }}"><option value="">—</option><option value="wholesale" {{ 'selected' if field.text == 'wholesale' }}>Wholesale / factory</option><option value="final" {{ 'selected' if field.text == 'final' }}>Final customer price</option></select>
+            {% elif name == 'price_basis' %}<select id="f-{{ row.id }}-{{ name }}" name="field:{{ name }}"><option value="">—</option><option value="unit" {{ 'selected' if field.text == 'unit' }}>Per piece</option><option value="line" {{ 'selected' if field.text == 'line' }}>For the whole line</option></select>
+            {% elif name == 'payment_type' %}<select id="f-{{ row.id }}-{{ name }}" name="field:{{ name }}"><option value="payment" {{ 'selected' if field.text == 'payment' }}>Payment received</option><option value="refund" {{ 'selected' if field.text == 'refund' }}>Refund</option></select>
+            {% elif name == 'stage' %}<select id="f-{{ row.id }}-{{ name }}" name="field:{{ name }}">{% for stage in ('unallocated', 'initial', 'ready') %}<option {{ 'selected' if field.text == stage }}>{{ stage }}</option>{% endfor %}</select>
+            {% else %}<input id="f-{{ row.id }}-{{ name }}" name="field:{{ name }}" value="{{ field.text }}" {% if name in ('requested_delivery_date', 'payment_date') %}type="date"{% endif %} autocomplete="off">{% endif %}
+          {% else %}<span id="f-{{ row.id }}-{{ name }}">{{ field.text or '—' }}{% if field.before is not none %} <small>(was {{ field.before }})</small>{% endif %}</span>{% endif %}
+          <span class="state state-{{ field.state }}" title="{{ field.origin }}">{{ field.state }}</span>
+          {% if field.raw or field.evidence or field.alternatives or field.history %}<div class="evidence">
+            {% if field.raw %}Source reading: “{{ field.raw }}”. {% endif %}
+            {% for item in field.evidence[:3] %}{% if item.source_item_id %}<a href="#source-{{ item.source_item_id }}">source #{{ item.source_item_id }}</a>{% endif %}{% if item.quote %} “{{ item.quote }}”{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}
+            {% if field.alternatives %} Other readings kept: {% for alt in field.alternatives %}{{ alt.value }}{% if not loop.last %}, {% endif %}{% endfor %}.{% endif %}
+            {% if field.history %} {{ field.history|length }} earlier value(s) kept.{% endif %}
+          </div>{% endif %}
+        {% endif %}{% endfor %}
+        </div>
+        {% if row.status == 'draft' %}{% if view.fields.order is defined and (view.fields.order.text or '').startswith('New table') %}<p><label>Markup % for the new table <input name="field:markup" inputmode="decimal" placeholder="e.g. 35"></label></p>{% endif %}
+        <p><button class="button small-button">Save row</button> <span class="autosave-status" aria-live="polite"></span></p>{% endif %}
+      </form>
+      {% if row.status == 'draft' and view.issues %}<ul class="row-issues">{% for issue in view.issues %}<li>{{ issue.text }}</li>{% endfor %}</ul>{% endif %}
+      {% if view.duplicates %}<p class="notice">Possible duplicate: {{ view.duplicates|length }} existing payment(s) from this customer with the same amount{% for p in view.duplicates[:3] %} ({{ p.date }}){% endfor %}. Save only if this is a separate payment.</p>{% endif %}
+      {% if view.plan %}<div class="plan"><dl>
+        <dt>Wholesale / unit</dt><dd>{{ view.plan.values.wholesale_unit_price|money }} {{ currency }}</dd>
+        <dt>Customer / unit</dt><dd>{{ view.plan.customer_unit|money }} {{ currency }}{% if view.plan.values.selling_unit_price is not none %} (kept as stated){% endif %}</dd>
+        <dt>Line value</dt><dd>{{ view.plan.line_value|money }} {{ currency }}</dd>
+        <dt>Markup</dt><dd>{{ view.plan.values.markup_percentage|percent }}</dd>
+      </dl>{% for note in view.plan.notes %}<p>{{ note }}</p>{% endfor %}</div>{% endif %}
+    </article>
+    {% else %}<p class="muted">No draft rows yet.</p>{% endfor %}
+    <div class="review-actions">
+      <form action="/intake/{{ session.public_id }}/rows" method="post"><input type="hidden" name="kind" value="new_item"><button class="button">Add product row</button></form>
+      <form action="/intake/{{ session.public_id }}/rows" method="post"><input type="hidden" name="kind" value="payment"><button class="button">Add payment row</button></form>
+    </div>
+  </section>
+
+  <section class="intake-pane evidence-pane" id="evidence" aria-label="Evidence">
+    <h2>Evidence</h2>
+    <ul class="sources">
+    {% for source in session.sources %}<li id="source-{{ source.id }}">
+      <strong>#{{ source.id }} {{ source.original_name or source.channel }}</strong> <span class="state state-{{ source.state }}">{{ source.state.replace('_', ' ') }}</span>
+      <br><small>{{ source.channel }} · {{ source.media_type }}{% if source.blob %} · {{ (source.blob.size_bytes / 1024)|round(1) }} KB · sha256 {{ source.blob.sha256[:10] }}…{% endif %}</small>
+      {% if source.state_reason %}<br><small>{{ source.state_reason }}</small>{% endif %}
+      {% if source.blob %}{% if source.media_type.startswith('image/') %}<a href="/sources/{{ source.id }}/content" target="_blank" rel="noopener"><img src="/sources/{{ source.id }}/content" alt="Attachment {{ source.original_name }}" loading="lazy"></a>
+      {% else %}<br><a href="/sources/{{ source.id }}/content" target="_blank" rel="noopener">Open original</a>{% endif %}{% endif %}
+    </li>{% else %}<li class="muted">No sources yet.</li>{% endfor %}
+    </ul>
+    {% if session.sources|selectattr('state', 'equalto', 'failed')|list %}<form action="/intake/{{ session.public_id }}/retry" method="post"><button class="button">Retry analysis of failed sources</button></form>{% endif %}
+  </section>
+</div>
+
+<section class="intake-pane review-box" id="review" aria-label="Review and save">
+  <h2>Review and save</h2>
+  {% if ready %}
+    <p>All required facts are present. Saving creates or corrects the rows above exactly once, even if you click twice or retry. The receipt then shows each affected customer's balances before and after.</p>
+    <div class="review-actions">
+      <form action="/intake/{{ session.public_id }}/commit" method="post" data-once><input type="hidden" name="operation_key" value="{{ operation_key }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}"><button class="button primary">Save records</button></form>
+      <form action="/intake/{{ session.public_id }}/commit" method="post" data-once><input type="hidden" name="operation_key" value="{{ operation_key }}"><input type="hidden" name="expected_revision" value="{{ session.revision }}"><input type="hidden" name="then" value="excel"><button class="button">Save and download Excel</button></form>
+    </div>
+  {% elif views|selectattr('row.status', 'equalto', 'draft')|list %}<p>Answer the open questions or fill the highlighted fields first. Incomplete drafts stay saved here; nothing is posted to accounts until you save.</p>
+  {% else %}<p class="muted">Nothing waiting to be saved.</p>{% endif %}
+  {% for receipt in receipts %}<p>Saved {{ receipt.saved_at[:16].replace('T', ' ') }} UTC · {{ receipt.rows|length }} row(s) · <a href="/intake/{{ session.public_id }}/receipts/{{ receipt.key }}">receipt and downloads</a></p>{% endfor %}
+</section>
+<script>
+(function () {
+  document.querySelectorAll('form[data-once]').forEach(function (form) {
+    form.addEventListener('submit', function () { form.querySelectorAll('button').forEach(function (b) { b.disabled = true; b.textContent = 'Saving…'; }); });
+  });
+  document.querySelectorAll('form[data-autosave]').forEach(function (form) {
+    var status = form.querySelector('.autosave-status');
+    form.addEventListener('change', function (event) {
+      if (!event.target.name || event.target.name.indexOf('field:') !== 0) return;
+      var data = new FormData();
+      data.append('expected_revision', form.querySelector('[name=expected_revision]').value);
+      data.append(event.target.name, event.target.value);
+      if (status) status.textContent = 'Saving…';
+      fetch(form.action, { method: 'POST', body: data, headers: { Accept: 'application/json' } })
+        .then(function (r) { return r.json().then(function (body) { return { ok: r.ok, body: body }; }); })
+        .then(function (result) {
+          if (result.ok) { form.querySelector('[name=expected_revision]').value = result.body.revision; if (status) status.textContent = 'Saved'; window.setTimeout(function () { window.location.reload(); }, 400); }
+          else if (status) { status.textContent = result.body.error || 'Not saved'; }
+        }).catch(function () { if (status) status.textContent = 'Offline: use Save row'; });
+    });
+  });
+})();
+</script>
+{% endblock %}

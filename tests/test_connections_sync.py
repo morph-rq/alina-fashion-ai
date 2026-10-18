@@ -286,6 +286,8 @@ def test_encrypted_recovery_upload_and_restore_with_written_code(world, tmp_path
     page = client.post("/recovery/key")
     code = page.text.split('letter-spacing:.05em;overflow-wrap:anywhere">')[1].split("<")[0].strip()
     assert len(code.replace("-", "")) == 52
+    assert "error=" in client.post("/recovery/key/acknowledge", data={"confirmation": "yes"}, follow_redirects=False).headers["location"]
+    client.post("/recovery/key/acknowledge", data={"confirmation": "I have stored it"})
     with factory() as db:
         db.add(SourceItem(channel="text", remote_id="x", original_name="note.txt"))
         db.commit()
@@ -315,3 +317,21 @@ def test_encrypted_recovery_upload_and_restore_with_written_code(world, tmp_path
     tampered.write_bytes(uploaded[:-10] + b"0123456789")
     with pytest.raises(ValueError):
         restore_exercise(recovery_crypto.parse_code(code), tmp_path / "tamper", archive=tampered)
+
+
+def test_standalone_restore_script_needs_only_archive_and_code(world, tmp_path):
+    import importlib.util
+    fake, factory, client = world
+    client.post("/recovery/key")
+    with factory() as db:
+        result = outbox.make_backup(db, "script test", force=True)
+        db.commit()
+    archive = next((tmp_path / "backups" / "recovery" / "encrypted").glob("*.afra"))
+    key = outbox.recovery_key()
+    spec = importlib.util.spec_from_file_location("restore_recovery", __import__("pathlib").Path(__file__).parent.parent / "scripts" / "restore_recovery.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    report = module.restore(archive, tmp_path / "replacement", recovery_crypto.format_code(key))
+    assert report["table_counts"]["seasons"] == 1 and result["encrypted"] == archive.name
+    with pytest.raises(ValueError):
+        module.restore(archive, tmp_path / "replacement", recovery_crypto.format_code(key))  # never overwrites

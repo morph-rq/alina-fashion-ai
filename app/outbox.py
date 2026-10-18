@@ -176,7 +176,10 @@ def make_backup(db: Session, reason: str, *, force: bool = False) -> dict:
         state.update(last_encrypted_at=now().isoformat(), last_encrypted_file=encrypted.name)
         result["encrypted"] = encrypted.name
         destination = _destination(db, None, "drive_recovery")
-        if destination is not None:
+        acknowledged = secret_store.load(recovery_crypto.KEY_REF).get("acknowledged")
+        if destination is not None and not acknowledged:
+            result["upload_waiting"] = "Confirm that the recovery code is stored before archives leave this computer."
+        elif destination is not None:
             _queue_file(db, destination, "recovery", encrypted)
             result["queued_upload"] = True
     secret_store.save(STATE_REF, state)

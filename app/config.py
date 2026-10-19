@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = ""
     ai_fallback_models: str = ""
+    # "anthropic" (Claude API) or "gemini". Empty = detect from the key (sk-ant-... means Claude).
+    ai_provider: str = ""
+    anthropic_api_key: str = ""
     # Backward-compatible local settings. New installations use the generic AI names above.
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
@@ -54,15 +57,29 @@ class Settings(BaseSettings):
 
     @property
     def active_ai_api_key(self) -> str:
-        return self.ai_api_key.strip() or self.gemini_api_key.strip()
+        return self.ai_api_key.strip() or self.anthropic_api_key.strip() or self.gemini_api_key.strip()
+
+    @property
+    def active_ai_provider(self) -> str:
+        explicit = self.ai_provider.strip().casefold()
+        if explicit in {"anthropic", "claude"}:
+            return "anthropic"
+        if explicit == "gemini":
+            return "gemini"
+        only_anthropic = self.anthropic_api_key.strip() and not self.ai_api_key.strip() and not self.gemini_api_key.strip()
+        return "anthropic" if self.active_ai_api_key.startswith("sk-ant-") or only_anthropic else "gemini"
 
     @property
     def active_ai_model(self) -> str:
-        return self.ai_model.strip() or self.gemini_model.strip()
+        if self.ai_model.strip():
+            return self.ai_model.strip()
+        return "claude-opus-5-5" if self.active_ai_provider == "anthropic" else self.gemini_model.strip()
 
     @property
     def active_ai_fallback_models(self) -> str:
-        return self.ai_fallback_models.strip() or self.gemini_fallback_models.strip()
+        if self.ai_fallback_models.strip():
+            return self.ai_fallback_models.strip()
+        return "claude-sonnet-5-5" if self.active_ai_provider == "anthropic" else self.gemini_fallback_models.strip()
 
 
 settings = Settings()

@@ -1,20 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Customers - {{ app_name }}{% endblock %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Customers{% endblock %}
 {% block content %}
-<section class="page-head friendly-head"><div><p class="eyebrow">Customer accounts</p><h1>Find a customer</h1><p>Search by name or code. Every account below is calculated from the {{ season.name if season else 'selected' }} master table.</p></div><form method="get" class="season-picker"><label>Season<select name="season" onchange="this.form.submit()">{% for option in seasons %}<option value="{{ option.name }}" {{ 'selected' if season and option.id == season.id else '' }}>{{ option.name }}</option>{% endfor %}</select></label></form></section>
-<section class="quick-search customer-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg><input id="customer-search" type="search" placeholder="Type a customer name or code…" autocomplete="off" aria-label="Search customers"><span id="customer-count">{{ statements|length }} customers</span></section>
-<section class="customer-simple-grid" id="customer-list">
-{% for statement in statements %}
-  <article class="customer-simple-card" data-search="{{ statement.customer.code|lower }} {{ (statement.customer.name or '')|lower }}">
-    <a class="customer-card-main" href="/customers/{{ statement.customer.id }}?season={{ season.name }}">
-      <span class="customer-avatar">{{ (statement.customer.name or statement.customer.code)[:1]|upper }}</span>
-      <span class="customer-identity"><strong>{{ statement.customer.name or 'Customer ' ~ statement.customer.code }}</strong><small>Code {{ statement.customer.code }} · {{ statement.items|length }} products</small></span>
-      <span class="customer-balance {{ 'paid' if statement.account.outstanding == 0 else '' }}"><small>{{ 'Paid in full' if statement.account.outstanding == 0 else 'Still to pay' }}</small><strong>{{ statement.account.outstanding|money }}</strong></span>
-    </a>
-    <div class="customer-card-actions"><a href="/customers/{{ statement.customer.id }}?season={{ season.name }}">Open account</a><a class="pdf-action" href="/reports/customers/{{ statement.customer.id }}/pdf?season={{ season.name }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v5h5M10 13h5M10 17h5"/></svg>Download PDF</a></div>
-  </article>
-{% endfor %}
-</section>
-<section class="empty search-empty" id="customer-empty" hidden><h2>No customer found</h2><p>Try a different spelling or customer code.</p></section>
+{% set sq = ('?season=' ~ (season.name|urlencode)) if season else '' %}
+<header class="page-header">
+  <div><h1>Customers</h1><p class="page-sub">{{ statements|length }} customer{{ '' if statements|length == 1 else 's' }}. Balances are calculated from the {{ season.name if season else 'selected' }} master table; each account sees only its own products and payments.</p></div>
+  <div class="page-actions">
+    {{ ui.season_select(seasons, season, action='/customers') }}
+    <details class="menu">
+      <summary class="btn">{{ ui.icon('file') }}Statements<span class="chev">{{ ui.icon('chev') }}</span></summary>
+      <div class="menu-panel" role="menu">
+        <p class="menu-label">Private PDFs, one per customer{% if season %} · {{ season.name }}{% endif %}</p>
+        <a class="menu-item" role="menuitem" href="/reports/customers-all.zip{{ sq }}">{{ ui.icon('download') }}<span>All customers<small>ZIP of statements</small></span></a>
+        <a class="menu-item" role="menuitem" href="/reports/customers-outstanding.zip{{ sq }}">{{ ui.icon('download') }}<span>Only customers who owe<small>ZIP of statements</small></span></a>
+        <a class="menu-item" role="menuitem" href="/reports{{ sq }}">{{ ui.icon('ready') }}<span>By Ready batch or one customer</span></a>
+      </div>
+    </details>
+  </div>
+</header>
+
+<div class="filter-bar" role="search">
+  <label class="search">Find a customer<input type="search" data-filter-input="customer-list" data-filter-count="customer-count" data-filter-empty="customer-empty" placeholder="Name, code, country…" autocomplete="off"></label>
+  <p class="muted" style="margin:0 0 9px"><span id="customer-count">{{ statements|length }}</span> shown</p>
+</div>
+
+<div class="table-frame"><table class="table stack-table">
+  <thead><tr><th>Customer</th><th>Country</th><th class="num">Products</th><th class="num">Charged</th><th class="num">Received</th><th class="num">Balance</th><th class="actions"><span class="sr-only">Statement</span></th></tr></thead>
+  <tbody id="customer-list">
+  {% for statement in statements %}{% set c = statement.customer %}
+    <tr data-search="{{ c.code|lower }} {{ (c.name or '')|lower }} {{ (c.country_code or '')|lower }} {{ c.aliases|map(attribute='alias')|join(' ')|lower }}">
+      <th><a class="person-head" href="/customers/{{ c.id }}{{ sq }}" style="text-decoration:none;color:inherit"><span class="avatar sm" aria-hidden="true">{{ (c.name or c.code)[:1]|upper }}</span><span><span style="color:var(--cobalt)">{{ c.name or 'Customer ' ~ c.code }}</span><small>Code {{ c.code }}</small></span></a></th>
+      <td data-label="Country">{{ c.country_code or '—' }}</td>
+      <td class="num" data-label="Products">{{ statement.items|length }}</td>
+      <td class="num" data-label="Charged">{{ statement.account.total_charged|money }}</td>
+      <td class="num" data-label="Received">{{ statement.account.total_paid|money }}</td>
+      <td class="num" data-label="Balance">{% if statement.account.outstanding > 0 %}<span class="balance-due">{{ statement.account.outstanding|money }} to pay</span>{% elif statement.account.overpayment > 0 %}<span class="balance-ok">{{ statement.account.overpayment|money }} in credit</span>{% else %}<span class="balance-ok">Paid in full</span>{% endif %}</td>
+      <td class="actions"><a class="btn sm quiet" href="/reports/customers/{{ c.id }}/pdf{{ sq }}" aria-label="Statement PDF for {{ c.name or c.code }}">{{ ui.icon('download') }}PDF</a></td>
+    </tr>
+  {% endfor %}
+  {% if not statements %}<tr class="table-empty"><td colspan="7">No customers yet. They are created with a season, an intake, the AI draft table or an Excel upload.</td></tr>{% endif %}
+  </tbody>
+</table></div>
+<p class="empty-state" id="customer-empty" hidden style="margin-top:12px">No customer matches that search. Try another spelling, a code or an alias.</p>
 {% endblock %}
-{% block scripts %}<script>(()=>{const input=document.getElementById('customer-search');const cards=[...document.querySelectorAll('#customer-list .customer-simple-card')];const count=document.getElementById('customer-count');const empty=document.getElementById('customer-empty');input?.addEventListener('input',()=>{const q=input.value.trim().toLowerCase();let shown=0;cards.forEach(card=>{const match=!q||card.dataset.search.includes(q);card.hidden=!match;if(match)shown++;});count.textContent=`${shown} ${shown===1?'customer':'customers'}`;empty.hidden=shown!==0;});})();</script>{% endblock %}

@@ -1,5 +1,22 @@
 {% extends "base.html" %}
+{% block title %}Issues and suggestions{% endblock %}
 {% block content %}
-<section class="hero slim"><div><p class="eyebrow">Automated controls</p><h1>Issues & suggestions</h1><p>Each issue has a suggested next step and a button to open the relevant editor.</p></div><div class="check-pill {{ 'ok' if report.passed else 'bad' }}">{{ 'PASS' if report.passed else 'FAIL' }}</div></section>
-<section class="panel"><div class="issue-summary"><span>{{ report.errors|length }} errors</span><span>{{ report.warnings|length }} warnings</span><span>{{ report.issues|selectattr('severity','equalto','pass')|list|length }} passed controls</span></div><div class="issue-list">{% for issue in report.issues %}<article class="issue {{ issue.severity }}"><span class="issue-icon">{{ '✓' if issue.severity == 'pass' else '!' if issue.severity == 'warning' else '×' }}</span><div><strong>{{ issue.code|replace('_',' ')|title }}</strong><p>{{ issue.message }}</p>{% if issue.entity %}<small>{{ issue.entity }}</small>{% endif %}{% if issue.suggestion %}<p class="issue-suggestion">{{ issue.suggestion }}</p>{% endif %}{% if issue.action_url %}<a class="button" href="{{ issue.action_url }}">{{ issue.action_label }} →</a>{% endif %}</div></article>{% endfor %}</div></section>
+{% set passed = report.issues|selectattr('severity', 'equalto', 'pass')|list %}
+{% set open = report.issues|rejectattr('severity', 'equalto', 'pass')|list %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Overview</a><span aria-hidden="true">/</span><span>System check</span></nav>
+<header class="page-header">
+  <div><h1>Issues and suggestions</h1><p class="page-sub">The system check reconciles every total against the product rows. Each issue has a suggested next step and a link to the editor that fixes it.</p></div>
+  <div class="page-actions">{% if report.passed %}<span class="badge tone-ok">Pass: all calculations reconcile</span>{% else %}<span class="badge tone-danger">Fail: {{ report.errors|length }} error{{ '' if report.errors|length == 1 else 's' }}</span>{% endif %}</div>
+</header>
+<div class="figures" style="--cols:3">
+  <div class="figure {{ 'alert' if report.errors else '' }}"><span class="figure-label">Errors</span><span class="figure-value">{{ report.errors|length }}</span><span class="figure-sub">Block a clean reconciliation</span></div>
+  <div class="figure"><span class="figure-label">Warnings</span><span class="figure-value">{{ report.warnings|length }}</span><span class="figure-sub">Worth checking</span></div>
+  <div class="figure"><span class="figure-label">Passed controls</span><span class="figure-value">{{ passed|length }}</span></div>
+</div>
+{% if open %}
+<div class="issue-list">{% for issue in open %}<article class="issue {{ issue.severity }}"><span class="issue-icon" aria-hidden="true">{{ '!' if issue.severity == 'warning' else '×' }}</span><div><strong>{{ issue.code|replace('_', ' ')|capitalize }}</strong> <span class="sr-only">({{ issue.severity }})</span><p>{{ issue.message }}</p>{% if issue.entity %}<small>{{ issue.entity }}</small>{% endif %}{% if issue.suggestion %}<p class="issue-suggestion">{{ issue.suggestion }}</p>{% endif %}{% if issue.action_url %}<a class="btn sm" href="{{ issue.action_url }}">{{ issue.action_label }}</a>{% endif %}</div></article>{% endfor %}</div>
+{% else %}<div class="all-clear"><span class="sev ok" aria-hidden="true">✓</span><div><strong>Difference: {{ currency }} 0.00</strong><p class="muted" style="margin:2px 0 0">All calculations reconcile.</p></div></div>{% endif %}
+{% if passed %}<details class="panel wb-reviews"><summary>{{ passed|length }} passed control{{ '' if passed|length == 1 else 's' }}</summary>
+  <div class="issue-list" style="margin-top:12px">{% for issue in passed %}<article class="issue pass"><span class="issue-icon" aria-hidden="true">✓</span><div><strong>{{ issue.code|replace('_', ' ')|capitalize }}</strong><p>{{ issue.message }}</p></div></article>{% endfor %}</div>
+</details>{% endif %}
 {% endblock %}

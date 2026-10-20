@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Ready & shipping{% endblock %}
+{% block content %}
+{% set sname = season.name if season else '' %}
+{% set here = '/logistics?season=' ~ (sname|urlencode) %}
+{{ ui.workspace_bar(season) }}
+<header class="page-header">
+  <div><h1>Ready &amp; shipping</h1><p class="page-sub">{% if season %}{{ season.name }}: Ready batches, factory balances, shipments, transport costs and shipment groups.{% else %}Create a season first.{% endif %}</p></div>
+  <div class="page-actions">
+    {{ ui.season_select(seasons, season, action='/logistics') }}
+    {% if season %}
+    <button class="btn primary" type="button" data-open="process-ready">{{ ui.icon('ready') }}Process a Ready list</button>
+    <details class="menu">
+      <summary class="btn">{{ ui.icon('plus') }}New<span class="chev">{{ ui.icon('chev') }}</span></summary>
+      <div class="menu-panel" role="menu">
+        <button class="menu-item" type="button" role="menuitem" data-open="new-batch">{{ ui.icon('ready') }}<span>Ready batch<small>Name a batch, then assign goods in the brand tables</small></span></button>
+        <button class="menu-item" type="button" role="menuitem" data-open="factory-payment">{{ ui.icon('money') }}<span>Factory payment</span></button>
+        <div class="menu-sep" role="separator"></div>
+        <button class="menu-item" type="button" role="menuitem" data-open="new-shipment">{{ ui.icon('ready') }}<span>Shipment<small>Transport, fixed, suitcase and bag costs</small></span></button>
+        <button class="menu-item" type="button" role="menuitem" data-open="new-expense">{{ ui.icon('money') }}<span>Exceptional expense</span></button>
+        <div class="menu-sep" role="separator"></div>
+        <button class="menu-item" type="button" role="menuitem" data-open="new-group">{{ ui.icon('layers') }}<span>Shipment group<small>A distributor, a seller and products shipped together</small></span></button>
+        <button class="menu-item" type="button" role="menuitem" data-open="new-distributor">{{ ui.icon('customers') }}<span>Distributor</span></button>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</header>
+
+{% set done_messages = {'batch': 'Ready batch created', 'factory': 'Factory payment recorded', 'shipment': 'Shipment created', 'expense': 'Expense recorded', 'group': 'Shipment group created', 'distributor': 'Distributor added'} %}
+{% if request.query_params.get('done') in done_messages %}<div class="notice ok toast" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ done_messages[request.query_params.get('done')] }}</strong><p>It is in the list below and in the audit history.</p></div></div>{% endif %}
+{% if ready_result %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ ready_result }} unit(s) assigned automatically.</strong><p>Liabilities were recalculated for the affected customers.</p></div>{% if generated %}<a class="btn primary" href="/reports/download/{{ generated }}">Download affected customer PDFs</a>{% endif %}</div>{% endif %}
+
+<nav class="chips" aria-label="On this page"><a class="chip" href="#ready">Ready batches <span class="n">{{ rows|length }}</span></a><a class="chip" href="#shipments">Shipments and costs <span class="n">{{ summaries|length }}</span></a><a class="chip" href="#groups">Groups and distributors <span class="n">{{ groups|length }}</span></a></nav>
+
+<section class="section" id="ready" aria-labelledby="ready-title">
+  <div class="section-head"><div><h2 id="ready-title">Ready batches</h2><p>The remaining percentage is charged only for goods in a Ready batch; each customer's collection is checked separately.</p></div></div>
+  {% if rows %}
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Batch</th><th>Ready date</th><th class="num">Items</th><th class="num">Goods value</th><th class="num">Customer Ready due</th><th class="num">Customer paid</th><th class="num">Factory paid</th><th class="num">Factory balance</th><th>Status</th><th class="actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <th>{{ row.batch.name }}{% if row.batch.notes %}<small>{{ row.batch.notes }}</small>{% endif %}</th><td>{{ row.batch.ready_date or '—' }}</td><td class="num">{{ row.batch.items|length }}</td>
+      <td class="num">{{ row.value|money }}</td><td class="num">{{ row.due|money }}</td><td class="num">{{ row.customer_paid|money }}</td><td class="num">{{ row.factory_paid|money }}</td>
+      <td class="num">{% if row.factory_balance > 0 %}<span class="balance-due">{{ row.factory_balance|money }}</span>{% else %}{{ row.factory_balance|money }}{% endif %}</td>
+      <td><span class="badge">{{ row.batch.status }}</span></td>
+      <td class="actions"><a class="btn sm quiet" href="/reports/customers-ready/{{ row.batch.id }}.zip">Statements</a> <button class="btn sm" type="button" data-open="factory-payment" data-set='{"stage": "ready", "ready_batch_id": "{{ row.batch.id }}"}'>Factory payment</button></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% elif season %}
+  {% call ui.empty('No Ready batches in ' ~ season.name, 'Process a supplier Ready list to create a batch and match its goods, or create an empty batch and assign goods in the brand tables.') %}<button class="btn primary" type="button" data-open="process-ready">Process a Ready list</button><button class="btn" type="button" data-open="new-batch">New Ready batch</button>{% endcall %}
+  {% endif %}
+</section>
+
+<section class="section" id="shipments" aria-labelledby="shipments-title">
+  <div class="section-head"><div><h2 id="shipments-title">Shipments and costs</h2><p>Transport follows the Brand + Season rule (CH exempt by default) unless a shipment sets its own percentage.</p></div>
+    {% if season %}<div class="btn-row"><button class="btn sm" type="button" data-open="new-shipment">New shipment</button><button class="btn sm quiet" type="button" data-open="new-expense">Record expense</button></div>{% endif %}</div>
+  {% if season and not is_newest %}<div class="notice warn"><span class="notice-icon" aria-hidden="true">!</span><div><strong>New shipments and expenses are recorded in {{ newest.name }}, the newest season.</strong><p>This list shows {{ season.name }}. <a href="/logistics?season={{ newest.name|urlencode }}&amp;focus=shipments">Switch to {{ newest.name }}</a> to add one.</p></div></div>{% endif %}
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Shipment</th><th>Date</th><th>Status</th><th class="num">Items</th><th class="num">Merchandise</th><th>Transport source</th><th class="num">Transport</th><th class="num">Fixed, suitcase, bag</th><th class="num">Total fees</th></tr></thead>
+    <tbody>{% for row in summaries %}<tr><th>{{ row.shipment.name }}{% if row.shipment.destination_country_code %}<small>to {{ row.shipment.destination_country_code }}</small>{% endif %}</th><td>{{ row.shipment.date or '—' }}</td><td><span class="badge">{{ row.shipment.status }}</span></td><td class="num">{{ row.shipment.items|length }}</td><td class="num">{{ row.merchandise_value|money }}</td><td>{{ 'Brand + Season rule' if row.shipment.use_rule_transport else (row.shipment.transport_percentage|percent) ~ ' set on shipment' }}</td><td class="num">{{ row.transport_fee|money }}</td><td class="num">{{ row.fixed_costs|money }}</td><td class="num">{{ row.total_fees|money }}</td></tr>
+    {% else %}<tr class="table-empty"><td colspan="9">No shipments{% if season %} in {{ season.name }}{% endif %} yet.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <h3 style="margin:18px 0 8px">Exceptional expenses</h3>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Type</th><th>Shipment</th><th>Order</th><th>Customer</th><th>Note</th><th class="num">Amount</th></tr></thead>
+    <tbody>{% for expense in expenses %}<tr><td>{{ expense.type }}</td><td>{{ expense.shipment.name if expense.shipment else '—' }}</td><td>{{ expense.order.brand.name if expense.order else '—' }}</td><td>{{ expense.customer.code if expense.customer else 'Shared by value' }}</td><td class="text">{{ expense.note or '—' }}</td><td class="num">{{ expense.amount|money }}</td></tr>
+    {% else %}<tr class="table-empty"><td colspan="6">No exceptional expenses recorded.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="section" id="groups" aria-labelledby="groups-title">
+  <div class="section-head"><div><h2 id="groups-title">Shipment groups and distributors</h2><p>Products ordered and shipped together, with a distributor, the seller holding the prepayment, shared costs and payment stages.</p></div>
+    <div class="btn-row"><button class="btn sm" type="button" data-open="new-group">New group</button><button class="btn sm quiet" type="button" data-open="new-distributor">Add distributor</button><a class="btn sm quiet" href="/worksheet">Select products in Workspace</a></div></div>
+  {% if distributors %}<p class="muted" style="margin:-4px 0 12px">Distributors: {% for d in distributors %}<strong style="color:var(--ink)">{{ d.name }}</strong>{% if d.contact %} ({{ d.contact }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  {% for group in groups %}{% set amount = group_amounts[group.id] %}
+  <article class="panel group-card" id="group-{{ group.id }}" aria-labelledby="group-{{ group.id }}-title">
+    <header><div><h3 id="group-{{ group.id }}-title" style="margin:0;font-size:16px">{{ group.name }}</h3><p>Group {{ '%02d'|format(group.id) }} · {{ group.season.name }} · {{ group.distributor.name if group.distributor else 'Distributor not assigned' }} / {{ group.seller or 'seller not supplied' }}</p></div>
+      <a class="btn sm" href="/worksheet?group={{ group.id }}">{{ group.items|length }} product{{ '' if group.items|length == 1 else 's' }}</a></header>
+    <div class="money-strip">
+      <div><small>Product value</small><strong>{{ amount.value|money }}</strong></div>
+      <div><small>{{ group.initial_percentage|percent }} initial prepayment</small><strong>{{ amount.initial|money }}</strong></div>
+      <div><small>{{ group.shipment_percentage|percent }} + {{ group.transport_percentage|percent }} at shipment</small><strong>{{ amount.shipment|money }}</strong></div>
+      <div><small>Shared special cost</small><strong>{{ amount.special|money }}</strong></div>
+      <div><small>Planned total incl. transport</small><strong>{{ amount.total|money }}</strong></div>
+    </div>
+    <div class="group-body">
+      <p class="muted" style="font-size:13px">Planning figures only: transport at shipment is {{ amount.transport|money }} {{ currency }} (CH customers exempt). Record bank-confirmed money in <a href="/money?focus=seller-credit">Money › Seller credit</a>.</p>
+      <details>
+        <summary>Group settings and shared cost split</summary>
+        <form action="/groups/{{ group.id }}" method="post" class="form-grid" data-guard data-once>
+          <label>Group name<input name="name" value="{{ group.name }}" required maxlength="200"></label>
+          <label>Distributor<select name="distributor_id"><option value="">Not assigned</option>{% for d in distributors %}<option value="{{ d.id }}" {{ 'selected' if group.distributor_id == d.id }}>{{ d.name }}</option>{% endfor %}</select></label>
+          <label>Seller<input name="seller" value="{{ group.seller or '' }}" maxlength="200"></label>
+          <label>Initial prepayment %<input name="initial_percentage" type="number" step=".01" min="0" max="100" value="{{ (group.initial_percentage * 100)|plain }}" required></label>
+          <label>Merchandise at shipment %<input name="shipment_percentage" type="number" step=".01" min="0" max="100" value="{{ (group.shipment_percentage * 100)|plain }}" required></label>
+          <label>Transport at shipment %<input name="transport_percentage" type="number" step=".01" min="0" max="100" value="{{ (group.transport_percentage * 100)|plain }}" required></label>
+          <label>Actual special cost ({{ currency }})<input name="special_cost" type="number" step=".01" min="0" value="{{ group.special_cost }}" required></label>
+          <label>Split special cost<select name="cost_method">{% for key, label in [('value', 'By product value'), ('quantity', 'Per unit'), ('equal', 'Equally per product record')] %}<option value="{{ key }}" {{ 'selected' if group.cost_method == key }}>{{ label }}</option>{% endfor %}</select></label>
+          <label class="wide">Notes<textarea name="notes" rows="2">{{ group.notes or '' }}</textarea></label>
+          <div class="form-actions"><button class="btn primary">Save group settings</button><span class="muted" style="font-size:12.5px">Initial and shipment percentages must add up to 100%.</span></div>
+        </form>
+      </details>
+      <div class="table-frame"><table class="table">
+        <thead><tr><th>Product</th><th>Customer</th><th>Size / qty</th><th>Status</th><th class="num">Special cost share</th></tr></thead>
+        <tbody>{% for item in group.items %}<tr><td><a href="/worksheet/items/{{ item.id }}">{{ item.article or item.name or item.id }}</a><small>{{ item.order.brand.name }}</small></td><td>{{ item.customer.code if item.customer else 'Needs allocation' }}</td><td>{{ item.size or '—' }} / {{ item.quantity }}</td><td>{{ ui.swatch(item.worksheet_status or 'pending', status_labels.get(item.worksheet_status, item.status)) }}</td><td class="num">{{ amount.shares.get(item.id, 0)|money }}</td></tr>
+        {% else %}<tr class="table-empty"><td colspan="5">Select products in Workspace and move them to this group.</td></tr>{% endfor %}</tbody>
+      </table></div>
+      {% if group.shipment %}<p class="muted" style="margin:12px 0 0;font-size:13px">Dispatched as {{ group.shipment.name }} ({{ group.shipment.status }}). Status colours stay explicit; seller credit is not spent automatically.</p>
+      {% else %}<form action="/groups/{{ group.id }}/dispatch" method="post" class="inline-form" style="margin-top:12px" data-once data-confirm="Dispatch the whole group {{ group.name }}? Its products move to a new Ready batch and shipment.">
+        <label>Shipment date <input type="date" name="shipment_date" required></label><button class="btn">Dispatch this group</button><span class="muted" style="font-size:12.5px">Only active, in-process products can be dispatched.</span></form>{% endif %}
+    </div>
+  </article>
+  {% else %}
+  {% call ui.empty('No shipment groups yet', 'Create a group, then select products in Workspace and move them into it.') %}<button class="btn" type="button" data-open="new-group">New group</button>{% endcall %}
+  {% endfor %}
+</section>
+
+{% if season %}
+{% call ui.drawer('process-ready', 'Process a supplier Ready list', 'Creates the batch, matches products by article, recalculates liabilities and prepares statements for affected customers.') %}
+<form action="/ready-batches/process" method="post" enctype="multipart/form-data" class="form-grid" data-once>
+  <input type="hidden" name="season_name" value="{{ sname }}">
+  <label>Ready batch name<input name="name" placeholder="Ready 2" required></label>
+  <label>Factory Ready date<input type="date" name="ready_date"></label>
+  <label class="wide">Supplier Ready workbook (.xlsx)<input type="file" name="file" accept=".xlsx" required><small>Needs an Article/SKU column; Brand, Customer/Allocation, Size, Quantity and Ready are used when present. Ambiguous rows go to review.</small></label>
+  <div class="form-actions"><button class="btn primary">Process for {{ sname }}</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('new-batch', 'New Ready batch', 'For ' ~ sname ~ '. Assign goods to it in the brand tables.') %}
+<form action="/ready-batches" method="post" class="form-grid" data-once>
+  <input type="hidden" name="season_name" value="{{ sname }}"><input type="hidden" name="next" value="{{ here }}&amp;focus=ready&amp;done=batch">
+  <label>Name<input name="name" placeholder="Ready 2" required></label>
+  <label>Factory Ready date<input type="date" name="ready_date"></label>
+  <label class="wide">Notes<textarea name="notes" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Create batch</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('factory-payment', 'Record a factory payment', 'Money paid to a factory for ' ~ sname ~ '. Customer receipts never pay a factory automatically.') %}
+<form action="/factory-payments" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="season_name" value="{{ sname }}"><input type="hidden" name="next" value="{{ here }}&amp;focus=ready&amp;done=factory">
+  <label>Stage<select name="stage"><option value="initial">Initial combined order</option><option value="ready">Ready batch balance</option></select></label>
+  <label>Ready batch<select name="ready_batch_id"><option value="">Initial / none</option>{% for row in rows %}<option value="{{ row.batch.id }}">{{ row.batch.name }}</option>{% endfor %}</select><small>Required for a Ready balance.</small></label>
+  <label class="wide">Factory / brand order<select name="order_id"><option value="">Season level, allocate later</option>{% for order in orders %}<option value="{{ order.id }}">{{ order.brand.name }} / {{ order.season.name }}</option>{% endfor %}</select></label>
+  <label>Date<input type="date" name="payment_date" required></label>
+  <label>Amount ({{ currency }})<input type="number" min="0.01" step="0.01" name="amount" required></label>
+  <label class="wide">Note<textarea name="note" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Record factory payment</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('new-shipment', 'New shipment', 'Recorded in ' ~ newest.name ~ ', the newest season.') %}
+<form action="/shipments" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="next" value="/logistics?season={{ newest.name|urlencode }}&amp;focus=shipments&amp;done=shipment">
+  <label>Name<input name="name" placeholder="Sped 18" required></label>
+  <label>Date<input type="date" name="shipment_date"></label>
+  <label>Status<input name="status" value="Assigned"></label>
+  <label>Destination country<input name="destination_country_code" maxlength="2" placeholder="CH"><small>CH is exempt under the default rule.</small></label>
+  <fieldset class="wide"><legend>Transport</legend>
+    <label class="check-line"><input type="radio" name="use_rule_transport" value="on" checked> Use the Brand + Season transport rule</label>
+    <label class="check-line"><input type="radio" name="use_rule_transport" value="off"> Use this shipment's percentage</label>
+    <div class="form-grid" style="margin-top:8px"><label>Transport %<input name="transport_percentage" type="number" step="0.01" value="5"></label><label>Eligible value override<input name="eligible_override" type="number" step="0.01"><small>Only with this shipment's percentage.</small></label></div>
+  </fieldset>
+  <label>Fixed logistics cost<input name="fixed_cost" type="number" min="0" step="0.01" value="0"></label>
+  <label>Suitcase cost<input name="suitcase_cost" type="number" min="0" step="0.01" value="0"></label>
+  <label>Bag cost<input name="bag_cost" type="number" min="0" step="0.01" value="0"></label>
+  <label class="wide">Notes<textarea name="notes" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Create shipment</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('new-expense', 'Record an exceptional expense', 'Recorded in ' ~ newest.name ~ '. Assign it to a shipment, an order or a customer.') %}
+<form action="/expenses" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="next" value="/logistics?season={{ newest.name|urlencode }}&amp;focus=shipments&amp;done=expense">
+  <label>Type<select name="expense_type"><option>exceptional</option><option>transport</option><option>bag</option><option>suitcase</option><option>fixed logistics</option></select></label>
+  <label>Amount ({{ currency }})<input name="amount" type="number" min="0" step="0.01" required></label>
+  <label>Shipment<select name="shipment_id"><option value="">None</option>{% for row in summaries %}<option value="{{ row.shipment.id }}">{{ row.shipment.name }}</option>{% endfor %}</select></label>
+  <label>Factory / brand order<select name="order_id"><option value="">None</option>{% for order in orders %}<option value="{{ order.id }}">{{ order.brand.name }} / {{ order.season.name }}</option>{% endfor %}</select></label>
+  <label class="wide">Customer<select name="customer_id"><option value="">Share by shipment or order value</option>{% for customer in customers %}<option value="{{ customer.id }}">{{ customer.code }}{{ ' · ' ~ customer.name if customer.name }}</option>{% endfor %}</select></label>
+  <label class="wide">Note<textarea name="note" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Record expense</button></div>
+</form>
+{% endcall %}
+{% endif %}
+{% call ui.drawer('new-group', 'New shipment group', 'Products ordered and shipped together.') %}
+<form action="/groups" method="post" class="form-grid" data-once>
+  <input type="hidden" name="next" value="{{ here }}&amp;done=group">
+  <label class="wide">Group name<input name="name" required placeholder="September · Milan · Group 01" maxlength="200"></label>
+  <label>Season<select name="season_id" required>{% for s in seasons %}<option value="{{ s.id }}" {{ 'selected' if season and s.id == season.id }}>{{ s.name }}</option>{% endfor %}</select></label>
+  <label>Distributor<select name="distributor_id"><option value="">Assign later</option>{% for d in distributors %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+  <label class="wide">Seller holding the prepayment<input name="seller" placeholder="Seller or supplier account" maxlength="200"></label>
+  <div class="form-actions"><button class="btn primary">Create group</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('new-distributor', 'Add a distributor', 'Kept separate from the end customer and the seller; credit never moves between them silently.') %}
+<form action="/distributors" method="post" class="form-grid one" data-once>
+  <input type="hidden" name="next" value="{{ here }}&amp;focus=groups&amp;done=distributor">
+  <label>Name<input name="name" required maxlength="200" placeholder="Who orders and pays the prepayment?"></label>
+  <label>Contact or reference<input name="contact" maxlength="500" placeholder="E-mail, phone or account reference"></label>
+  <div class="form-actions"><button class="btn primary">Save distributor</button></div>
+</form>
+{% endcall %}
+{% endblock %}

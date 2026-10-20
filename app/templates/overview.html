@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Overview</h1>
+    <p class="page-sub">{% if data %}{{ season.name }}: {{ data.orders|length }} brand table{{ '' if data.orders|length == 1 else 's' }}, {{ tasks|length }} next action{{ '' if tasks|length == 1 else 's' }}.{% else %}Start by creating a season; everything else builds on it.{% endif %}</p>
+  </div>
+  <div class="page-actions">{{ ui.season_select(seasons, season, action='/') }}</div>
+</header>
+
+{% if not data %}
+{% call ui.empty('Start your first season', 'A season holds its brand tables, customers, payments and shipments. Create one in a few fields, set up many brands at once, or import an existing master workbook.') %}
+  <a class="btn primary" href="/manual-entry#new-season">Create a season</a><a class="btn" href="/seasons/new">Set up many brands</a><a class="btn" href="/import">Import a master workbook</a>
+{% endcall %}
+{% else %}
+{% set q = '?season=' ~ (season.name|urlencode) %}
+<div class="figures" style="--cols:4">
+  <a class="figure" href="/brands?season={{ season.id }}"><span class="figure-label">Order value</span><span class="figure-value">{{ data.totals.final|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">Initial prepayment {{ data.totals.required_prepayment|moneynb }}</span></a>
+  <a class="figure {{ 'alert' if data.account.outstanding > 0 else '' }}" href="/customers{{ q }}"><span class="figure-label">Customers still to pay</span><span class="figure-value">{{ data.account.outstanding|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">Received {{ data.account.total_paid|moneynb }} of {{ data.account.total_charged|moneynb }} charged</span></a>
+  <a class="figure" href="/money{{ q }}&amp;focus=factory"><span class="figure-label">Factory balance</span><span class="figure-value">{{ data.factory_account.outstanding|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">Paid {{ data.factory_paid|moneynb }} of {{ data.factory_required|moneynb }} required</span></a>
+  <a class="figure" href="/logistics{{ q }}"><span class="figure-label">Ready, not shipped</span><span class="figure-value">{{ data.totals.ready|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">Saldo still to fulfil {{ data.totals.saldo|moneynb }}</span></a>
+</div>
+{% endif %}
+
+<div class="overview-grid">
+  <div>
+    <section class="section" id="next-actions" aria-labelledby="next-actions-title">
+      <div class="section-head"><h2 id="next-actions-title">Next actions {% if tasks %}<span class="count {{ 'danger' if tasks|selectattr('severity', 'equalto', 'error')|list else '' }}">{{ tasks|length }}</span>{% endif %}</h2></div>
+      {% if tasks %}
+      <ul class="task-list">{% for task in tasks %}
+        <li><span class="sev {{ task.severity }}" aria-hidden="true">{{ '!' if task.severity in ['error', 'warning'] else 'i' }}</span>
+          <div><strong>{{ task.title }}</strong><p><span class="sr-only">{{ {'error': 'Do first.', 'warning': 'Reminder.', 'info': 'Next step.'}.get(task.severity, '') }} </span>{{ task.detail }}</p></div>
+          <a class="btn sm {{ 'primary' if task.severity == 'error' else '' }}" href="{{ task.action_url }}">{{ task.action_label }}</a></li>
+      {% endfor %}</ul>
+      {% else %}
+      <div class="all-clear"><span class="sev ok" aria-hidden="true">✓</span><div><strong>Nothing needs your attention</strong><p class="muted" style="margin:2px 0 0">Tasks appear here when goods become Ready, money is due or a source needs a decision.</p></div></div>
+      {% endif %}
+    </section>
+
+    {% if data %}
+    <section class="section" aria-labelledby="by-brand-title">
+      <div class="section-head"><div><h2 id="by-brand-title">{{ season.name }} by brand</h2></div><a class="btn sm" href="/brands?season={{ season.id }}">Open brand tables</a></div>
+      <div class="table-frame"><table class="table stack-table">
+        <thead><tr><th>Brand</th><th class="num">Order total</th><th class="num">Initial</th><th class="num">Ready</th><th class="num">Saldo</th><th>Factory readiness</th></tr></thead>
+        <tbody>{% for row in data.orders %}<tr>
+          <th><a href="/orders/{{ row.order.id }}">{{ row.order.brand.name }}</a></th>
+          <td class="num" data-label="Order total">{{ row.amounts.final|money }}</td><td class="num" data-label="Initial">{{ row.amounts.required_prepayment|money }}</td>
+          <td class="num" data-label="Ready">{{ row.amounts.ready|money }}</td><td class="num" data-label="Saldo">{{ row.amounts.saldo|money }}</td>
+          <td data-label="Factory readiness">{{ row.order.factory_ready_note or '—' }}</td></tr>{% else %}<tr class="table-empty"><td colspan="6">No brand tables in {{ season.name }} yet.</td></tr>{% endfor %}</tbody>
+        {% if data.orders %}<tfoot><tr><th>Total</th><td class="num">{{ data.totals.final|money }}</td><td class="num">{{ data.totals.required_prepayment|money }}</td><td class="num">{{ data.totals.ready|money }}</td><td class="num">{{ data.totals.saldo|money }}</td><td></td></tr></tfoot>{% endif %}
+      </table></div>
+    </section>
+    {% endif %}
+  </div>
+
+  <aside class="overview-side" aria-label="Status">
+    <section class="status-card" aria-labelledby="check-title">
+      <h2 id="check-title">System check</h2>
+      {% if report %}
+      <div class="check-line-status">
+        {% if report.passed %}<span class="badge tone-ok">All calculations reconcile</span>{% else %}<span class="badge tone-danger">Needs checking</span>{% endif %}
+        <span class="muted">{{ report.errors|length }} error{{ '' if report.errors|length == 1 else 's' }}, {{ report.warnings|length }} warning{{ '' if report.warnings|length == 1 else 's' }}</span>
+      </div>
+      {% endif %}
+      {% if check_error %}<p class="balance-due" style="font-size:13px">The check could not run: {{ check_error }}</p>{% endif %}
+      <a href="/validation">Open issues and suggestions</a>
+    </section>
+
+    <section class="status-card" aria-labelledby="inbox-title">
+      <h2 id="inbox-title">Inbox</h2>
+      <ul class="status-list">
+        {% for item in sessions %}<li><a href="/intake/{{ item.public_id }}">{{ item.title }}</a><span class="state state-{{ item.state }}">{{ item.state.replace('_', ' ') }}</span></li>{% endfor %}
+        {% if source_counts.get('failed') %}<li><strong>{{ source_counts.failed }} source{{ '' if source_counts.failed == 1 else 's' }} failed to process</strong><a href="/inbox?state=failed">Review</a></li>{% endif %}
+        {% if source_counts.get('captured') %}<li><span>{{ source_counts.captured }} captured source{{ '' if source_counts.captured == 1 else 's' }} not yet reviewed</span><a href="/inbox?state=captured">Open</a></li>{% endif %}
+        {% if open_reviews %}<li><span>{{ open_reviews }} source note{{ '' if open_reviews == 1 else 's' }} to resolve</span><a href="/inbox#reviews">Resolve</a></li>{% endif %}
+        {% if failed_jobs %}<li><strong>{{ failed_jobs }} background job{{ '' if failed_jobs == 1 else 's' }} stopped</strong><a href="/inbox#background">Retry</a></li>{% endif %}
+        {% if not sessions and not source_counts.get('failed') and not source_counts.get('captured') and not open_reviews and not failed_jobs %}<li><span class="muted">No drafts or sources are waiting.</span><a href="/inbox#compose">New intake</a></li>{% endif %}
+      </ul>
+    </section>
+
+    <section class="status-card" aria-labelledby="backup-title">
+      <h2 id="backup-title">Backups and connections</h2>
+      <ul class="status-list">
+        <li><span>Last verified snapshot</span><span>{% if recovery.last_local_at %}{{ recovery.last_local_at[:16].replace('T', ' ') }}{% else %}<span class="badge tone-warn">none yet</span>{% endif %}</span>
+          {% if recovery.unprotected %}<p>{{ recovery.unprotected }}</p>{% endif %}</li>
+        <li><span>Off-site copy</span><span>{% if recovery.last_remote_verified_at %}{{ recovery.last_remote_verified_at[:16].replace('T', ' ') }}{% elif not recovery.key_configured %}<span class="badge tone-neutral">needs a recovery code</span>{% else %}<span class="badge tone-neutral">not yet</span>{% endif %}</span>
+          {% if recovery.pending_uploads %}<p>{{ recovery.pending_uploads }} upload{{ '' if recovery.pending_uploads == 1 else 's' }} waiting{% for error in recovery.pending_errors %}: {{ error }}{% endfor %}</p>{% endif %}</li>
+        {% for connection in connections %}<li><span>{{ connection.account_email }}</span><span class="state state-{{ 'saved' if connection.status == 'connected' else 'failed' if connection.status == 'needs_reconnect' else 'collecting' }}">{{ connection.status.replace('_', ' ') }}</span>{% if connection.status_reason %}<p>{{ connection.status_reason }}</p>{% endif %}</li>{% else %}<li><span>Google Drive and Gmail</span><span class="muted">not connected</span></li>{% endfor %}
+        {% if pending_outbox %}<li><span>{{ pending_outbox }} outgoing file{{ '' if pending_outbox == 1 else 's' }} waiting or failed</span><a href="/connections">Check</a></li>{% endif %}
+      </ul>
+      <p style="margin:8px 0 0"><a href="/recovery">Recovery</a> · <a href="/connections">Connections</a></p>
+    </section>
+  </aside>
+</div>
+{% endblock %}

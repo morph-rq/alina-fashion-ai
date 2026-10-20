@@ -414,6 +414,18 @@ def test_manual_upload_is_audited_and_searchable(tmp_path, monkeypatch) -> None:
             assert item.image_match_method == "manual_product_upload"
             assert (permanent / item.image_path).is_file()
             assert session.scalar(select(AuditLog).where(AuditLog.entity_type == "OrderItem", AuditLog.entity_id == str(item.id), AuditLog.field == "image_path")) is not None
+            from_product_page = client.post(
+                f"/items/{item.id}/image", data={"return_to": "item"},
+                files={"image": ("second-look.png", _png_bytes("navy"), "image/png")}, follow_redirects=False,
+            )
+            assert from_product_page.headers["location"] == f"/worksheet/items/{item.id}?photo=saved"
+            saved_path = session.scalar(select(OrderItem.image_path).where(OrderItem.id == item.id))
+            damaged = bytearray(_png_bytes("red"))
+            damaged[-20] ^= 0xFF  # breaks a chunk checksum; Pillow reports it as SyntaxError
+            refused = client.post(f"/items/{item.id}/image", files={"image": ("broken.png", bytes(damaged), "image/png")}, follow_redirects=False)
+            assert refused.status_code == 422 and "damaged" in refused.json()["detail"]
+            session.expire_all()
+            assert session.scalar(select(OrderItem.image_path).where(OrderItem.id == item.id)) == saved_path
             library = client.get("/product-images?q=manual1")
             assert library.status_code == 200
             assert "Manual image item" in library.text

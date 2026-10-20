@@ -1,6 +1,23 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Statements{% endblock %}
 {% block content %}
-<section class="page-head"><div><p class="eyebrow">Source-of-truth documents · {{ season.name if season else 'No season' }}</p><h1>Customer reports</h1><p>Each PDF is customer- and season-scoped before products, payments, Ready goods, shipments and transport are loaded.</p></div><div class="page-head-actions"><form method="get" class="season-picker"><label>Season<select name="season" onchange="this.form.submit()">{% for option in seasons %}<option value="{{ option.name }}" {{ 'selected' if season and option.id == season.id else '' }}>{{ option.name }}</option>{% endfor %}</select></label></form><div class="inline-actions"><a class="button" href="/reports/customers-outstanding.zip?season={{ season.name }}">Only outstanding</a><a class="button primary" href="/reports/customers-all.zip?season={{ season.name }}">All customers</a></div></div></section>
-<section class="panel"><h2>Only customers affected by a Ready batch</h2><div class="inline-actions">{% for batch in ready_batches %}<a class="button" href="/reports/customers-ready/{{ batch.id }}.zip">{{ batch.name }}</a>{% endfor %}</div></section>
-<section class="panel"><table class="data-table"><thead><tr><th>Customer</th><th>Name</th><th>Statement</th></tr></thead><tbody>{% for customer in customers %}<tr><th>{{ customer.code }}</th><td>{{ customer.name or '-' }}</td><td><a class="button" href="/reports/customers/{{ customer.id }}/pdf?season={{ season.name }}">Generate {{ customer.code }} PDF</a></td></tr>{% endfor %}</tbody></table></section>
+{% set sq = ('?season=' ~ (season.name|urlencode)) if season else '' %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/customers{{ sq }}">Customers</a><span aria-hidden="true">/</span><span>Statements</span></nav>
+<header class="page-header">
+  <div><h1>Customer statements</h1><p class="page-sub">Each PDF is filtered to one customer and {{ season.name if season else 'the selected season' }} before anything is loaded: products, final prices, payments, Ready goods, shipments, delivery charges and balance. Internal costs never appear.</p></div>
+  <div class="page-actions">{{ ui.season_select(seasons, season, action='/reports') }}<a class="btn" href="/reports/customers-outstanding.zip{{ sq }}">Only customers who owe</a><a class="btn primary" href="/reports/customers-all.zip{{ sq }}">{{ ui.icon('download') }}All customers (ZIP)</a></div>
+</header>
+<section class="section" aria-labelledby="batch-title">
+  <div class="section-head"><div><h2 id="batch-title">Customers affected by a Ready batch</h2><p>One ZIP with a fresh statement for every customer whose goods are in the batch.</p></div></div>
+  {% if ready_batches %}<div class="btn-row">{% for batch in ready_batches %}<a class="btn" href="/reports/customers-ready/{{ batch.id }}.zip">{{ ui.icon('download') }}{{ batch.name }}</a>{% endfor %}</div>
+  {% else %}<p class="muted">No Ready batches in {{ season.name if season else 'this season' }}.</p>{% endif %}
+</section>
+<section class="section" aria-labelledby="single-title">
+  <div class="section-head"><h2 id="single-title">One customer</h2></div>
+  <div class="table-frame"><table class="table stack-table"><thead><tr><th>Customer</th><th>Name</th><th class="actions"><span class="sr-only">Statement</span></th></tr></thead><tbody>
+  {% for customer in customers %}<tr><th><a href="/customers/{{ customer.id }}{{ sq }}">{{ customer.code }}</a></th><td data-label="Name">{{ customer.name or '—' }}</td><td class="actions"><a class="btn sm" href="/reports/customers/{{ customer.id }}/pdf{{ sq }}">{{ ui.icon('download') }}{{ customer.code }} statement PDF</a></td></tr>
+  {% else %}<tr class="table-empty"><td colspan="3">No customers yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
 {% endblock %}

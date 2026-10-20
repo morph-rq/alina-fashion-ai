@@ -1,23 +1,97 @@
 {% extends "base.html" %}
-{% block title %}Source inbox · {{ app_name }}{% endblock %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Inbox{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/intake.css?v=20261018">
-<section class="page-head"><div><p class="eyebrow">Uploads · Google Drive · e-mail</p><h1>Source inbox</h1>
-<p>Every piece of evidence is listed with its state. Captured means the original is stored; applied means a saved operation used it. Nothing is deleted from here.</p></div>
-<div><a class="button" href="/intake">Intake</a> <a class="button" href="/connections">Connections</a></div></section>
-<nav class="wb-tabs"><a href="/inbox">All</a>{% for name in states %}<a href="/inbox?state={{ name }}">{{ name.replace('_', ' ') }} ({{ counts.get(name, 0) }})</a>{% endfor %}</nav>
-{% if failed_jobs %}<section class="panel"><h2>Background work that stopped</h2>
-{% for job in failed_jobs %}<form action="/inbox/jobs/{{ job.id }}/retry" method="post"><strong>{{ job.kind }}</strong> after {{ job.attempts }} attempt(s): {{ job.last_error }} <button class="button small-button">Retry</button></form>{% endfor %}</section>{% endif %}
-<section class="panel"><table class="data-table"><thead><tr><th>Received</th><th>Channel</th><th>Source</th><th>State</th><th>Actions</th></tr></thead><tbody>
-{% for item in items %}{% set meta = metadata[item.id] %}<tr>
-<td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') if item.created_at }}</td><td>{{ item.channel }}{% if item.account %}<br><small>{{ item.account }}</small>{% endif %}</td>
-<td class="text"><strong>{{ item.original_name or item.remote_id }}</strong>{% if meta.subject %}<br>{{ meta.subject }}{% endif %}{% if meta.sender %}<br><small>from {{ meta.sender }}</small>{% endif %}
-{% for child in children.get(item.id, []) %}<br><small>↳ {{ child.original_name }} <span class="state state-{{ child.state }}">{{ child.state }}</span>{% if child.state_reason %} {{ child.state_reason }}{% endif %}</small>{% endfor %}
-{% if item.source_link %}<br><a href="{{ item.source_link }}" rel="noopener noreferrer" target="_blank">open at source</a>{% endif %}</td>
-<td><span class="state state-{{ item.state }}">{{ item.state.replace('_', ' ') }}</span>{% if item.state_reason %}<br><small>{{ item.state_reason }}</small>{% endif %}</td>
-<td>{% if item.session_id %}<form action="/inbox/{{ item.id }}/intake" method="post"><button class="button small-button">Open intake</button></form>{% elif item.state not in ('applied', 'ignored') %}<form action="/inbox/{{ item.id }}/intake" method="post"><select name="season_id" required aria-label="Season"><option value="">Season…</option>{% for season in seasons %}<option value="{{ season.id }}">{{ season.name }}</option>{% endfor %}</select><button class="button small-button">Review in intake</button></form>
-<form action="/inbox/{{ item.id }}/ignore" method="post"><input name="reason" placeholder="Reason to ignore" required minlength="5"><button class="button small-button">Ignore</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="5">No sources yet.</td></tr>{% endfor %}</tbody></table></section>
-<section class="panel"><h2>Background queue</h2>{% if queue %}<ul>{% for kind, states in queue.items() %}<li>{{ kind }}: {% for name, count in states.items() %}{{ name }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}</li>{% endfor %}</ul>{% else %}<p class="muted">No background work recorded.</p>{% endif %}
-<p class="muted">Background work runs only while the app is running. After a stop it resumes from the recorded queue at the next start.</p></section>
+{% set waiting = sessions|rejectattr('state', 'equalto', 'saved')|list %}
+{% set saved = sessions|selectattr('state', 'equalto', 'saved')|list %}
+<header class="page-header">
+  <div><h1>Inbox</h1><p class="page-sub">Everything that arrives: uploads, Drive files and e-mail, the assistant's drafts and questions, and source notes waiting for a decision. Nothing here posts goods or money until you save it.</p></div>
+  <div class="page-actions">
+    <details class="menu">
+      <summary class="btn">Other ways to add<span class="chev">{{ ui.icon('chev') }}</span></summary>
+      <div class="menu-panel" role="menu">
+        <a class="menu-item" role="menuitem" href="/ai-intake">{{ ui.icon('layers') }}<span>Quick AI draft table<small>One page: several rows from a note or files, saved row by row</small></span></a>
+        <a class="menu-item" role="menuitem" href="/manual-entry">{{ ui.icon('product') }}<span>Type a product<small>No assistant involved</small></span></a>
+        <a class="menu-item" role="menuitem" href="/excel">{{ ui.icon('sheet') }}<span>Edited Excel workbook</span></a>
+        <a class="menu-item" role="menuitem" href="/logistics#do-process-ready">{{ ui.icon('ready') }}<span>Supplier Ready list</span></a>
+        <a class="menu-item" role="menuitem" href="/import">{{ ui.icon('upload') }}<span>Original master workbook</span></a>
+      </div>
+    </details>
+    <a class="btn quiet" href="/connections">Drive and Gmail</a>
+  </div>
+</header>
+
+<section class="composer" id="compose" aria-labelledby="compose-title">
+  <h2 id="compose-title" style="margin-bottom:10px">New intake</h2>
+  {% if seasons %}
+  <form action="/intake" method="post" enctype="multipart/form-data" data-once data-guard>
+    <label class="sr-only" for="compose-message">Message</label>
+    <textarea id="compose-message" name="message" rows="3" placeholder="Describe what happened, for example: Maria Ivanova, The Row, black coat, size 38, 1200 wholesale. Or attach photos, screenshots, PDFs, spreadsheets or voice notes."></textarea>
+    <div class="composer-row">
+      <label class="season-pick"><span>Season</span><select name="season_id" required>{% for season in seasons %}<option value="{{ season.id }}">{{ season.name }}</option>{% endfor %}</select></label>
+      <label class="grow"><span class="sr-only">Title (optional)</span><input name="title" maxlength="200" placeholder="Title (optional), e.g. Maria — The Row coat"></label>
+      <label><span class="sr-only">Attachments</span><input type="file" name="attachments" multiple accept="image/*,application/pdf,.xlsx,.xlsm,.csv,.txt,audio/*"></label>
+      <button class="btn primary" type="submit">Start intake</button>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">Files are stored and checksummed before anything reads them. Text inside documents is treated as evidence, never as instructions.{% if not ai_configured %} AI extraction is not configured here: sources are still stored and you fill the draft rows by hand.{% endif %}</p>
+  </form>
+  {% else %}
+  <p class="muted">Create a season first; every intake belongs to one.</p><a class="btn" href="/manual-entry#new-season">Create a season</a>
+  {% endif %}
+</section>
+
+<div class="grid-2">
+  <section aria-labelledby="intakes-title">
+    <div class="section-head"><h2 id="intakes-title">Intakes {% if waiting %}<span class="count warn">{{ waiting|length }}</span>{% endif %}</h2></div>
+    <ul class="row-list">
+      {% for item in waiting %}<li><div><a href="/intake/{{ item.public_id }}"><strong>{{ item.title }}</strong></a><p>{{ item.season.name if item.season else 'No season' }} · {{ item.rows|selectattr('status', 'ne', 'excluded')|list|length }} row(s) · updated {{ item.updated_at.strftime('%Y-%m-%d %H:%M') if item.updated_at }}</p></div><span class="state state-{{ item.state }}">{{ item.state.replace('_', ' ') }}</span></li>
+      {% else %}<li><div><strong>No drafts waiting</strong><p>Start an intake above; incomplete drafts are kept here until you save them.</p></div></li>{% endfor %}
+    </ul>
+    {% if saved %}<details class="wb-reviews"><summary>{{ saved|length }} saved intake{{ '' if saved|length == 1 else 's' }}</summary>
+      <ul class="row-list" style="margin-top:10px">{% for item in saved %}<li><div><a href="/intake/{{ item.public_id }}">{{ item.title }}</a><p>{{ item.season.name if item.season else 'No season' }} · {{ item.updated_at.strftime('%Y-%m-%d %H:%M') if item.updated_at }}</p></div><span class="state state-saved">saved</span></li>{% endfor %}</ul>
+    </details>{% endif %}
+  </section>
+
+  <section id="reviews" aria-labelledby="reviews-title">
+    <div class="section-head"><h2 id="reviews-title">Reviews {% if review_counts.import + review_counts.allocation + review_counts.changes %}<span class="count warn">{{ review_counts.import + review_counts.allocation + review_counts.changes }}</span>{% endif %}</h2><a href="/validation">System check</a></div>
+    <ul class="row-list">
+      {% for review in allocation_reviews %}<li><div><strong>Customer allocation · {{ review.sheet }}{% if review.row %} row {{ review.row }}{% endif %}</strong><p>{{ review.raw_description or review.reason }}</p></div><a class="btn sm" href="/source-reviews/allocation/{{ review.id }}">Allocate</a></li>{% endfor %}
+      {% for review in import_reviews %}<li><div><strong>Source note · {{ review.sheet }}{% if review.row %} row {{ review.row }}{% endif %}</strong><p>{{ review.reason }}</p></div><a class="btn sm" href="/source-reviews/import/{{ review.id }}">Review</a></li>{% endfor %}
+      {% if review_counts.changes %}<li><div><strong>{{ review_counts.changes }} protected supplier change{{ '' if review_counts.changes == 1 else 's' }}</strong><p>Changed rows kept for review because operational history already exists.</p></div><a class="btn sm" href="/import#import-changes">Compare</a></li>{% endif %}
+      {% if review_counts.allocation > allocation_reviews|length or review_counts.import > import_reviews|length %}<li><div><p>More notes: <a href="/source-reviews?kind=allocation">all allocations ({{ review_counts.allocation }})</a> · <a href="/source-reviews?kind=import">all source notes ({{ review_counts.import }})</a></p></div></li>{% endif %}
+      {% if not allocation_reviews and not import_reviews and not review_counts.changes %}<li><div><strong>Nothing to resolve</strong><p>Ambiguous supplier rows and import notes appear here.</p></div></li>{% endif %}
+    </ul>
+  </section>
+</div>
+
+<section class="section" id="sources" aria-labelledby="sources-title">
+  <div class="section-head"><div><h2 id="sources-title">Sources</h2><p>Captured means the original is stored; applied means a saved operation used it. Nothing is deleted from here.</p></div></div>
+  <nav class="chips" aria-label="Filter sources by state">
+    <a class="chip" href="/inbox#sources" {% if not state and not channel %}aria-current="page"{% endif %}>All</a>
+    {% for name in states %}{% if counts.get(name, 0) or state == name %}<a class="chip" href="/inbox?state={{ name }}#sources" {% if state == name %}aria-current="page"{% endif %}>{{ name.replace('_', ' ') }} <span class="n">{{ counts.get(name, 0) }}</span></a>{% endif %}{% endfor %}
+    {% if channels|length > 1 %}{% for name in channels %}<a class="chip" href="/inbox?channel={{ name|urlencode }}#sources" {% if channel == name %}aria-current="page"{% endif %}>{{ name }}</a>{% endfor %}{% endif %}
+  </nav>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Received</th><th>Channel</th><th>Source</th><th>State</th><th>Actions</th></tr></thead>
+    <tbody>{% for item in items %}{% set meta = metadata[item.id] %}<tr>
+      <td class="nowrap">{{ item.created_at.strftime('%Y-%m-%d %H:%M') if item.created_at }}</td>
+      <td>{{ item.channel }}{% if item.account %}<small>{{ item.account }}</small>{% endif %}</td>
+      <td class="text"><strong>{{ item.original_name or item.remote_id }}</strong>{% if meta.subject %}<small>{{ meta.subject }}</small>{% endif %}{% if meta.sender %}<small>from {{ meta.sender }}</small>{% endif %}
+        {% for child in children.get(item.id, []) %}<small>↳ {{ child.original_name }} <span class="state state-{{ child.state }}">{{ child.state }}</span>{% if child.state_reason %} {{ child.state_reason }}{% endif %}</small>{% endfor %}
+        {% if item.source_link %}<small><a href="{{ item.source_link }}" rel="noopener noreferrer" target="_blank">Open at source</a></small>{% endif %}</td>
+      <td><span class="state state-{{ item.state }}">{{ item.state.replace('_', ' ') }}</span>{% if item.state_reason %}<small>{{ item.state_reason }}</small>{% endif %}</td>
+      <td>{% if item.session_id %}<form action="/inbox/{{ item.id }}/intake" method="post"><button class="btn sm">Open intake</button></form>
+        {% elif item.state not in ('applied', 'ignored') %}
+        <form action="/inbox/{{ item.id }}/intake" method="post" class="inline-form"><select name="season_id" required aria-label="Season for this source"><option value="">Season…</option>{% for season in seasons %}<option value="{{ season.id }}">{{ season.name }}</option>{% endfor %}</select><button class="btn sm">Review in intake</button></form>
+        <form action="/inbox/{{ item.id }}/ignore" method="post" class="inline-form" style="margin-top:6px"><input name="reason" placeholder="Reason to ignore" required minlength="5" aria-label="Reason to ignore this source"><button class="btn sm quiet">Ignore</button></form>{% endif %}</td>
+    </tr>{% else %}<tr class="table-empty"><td colspan="5">{% if state or channel %}No sources in this state.{% else %}No sources yet. Uploads appear here, and so do Drive files and e-mail once a connection is set up.{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="section" id="background" aria-labelledby="background-title">
+  <div class="section-head"><div><h2 id="background-title">Background work</h2><p>Runs only while the app is running; after a stop it resumes from the recorded queue at the next start.</p></div></div>
+  {% for job in failed_jobs %}<form action="/inbox/jobs/{{ job.id }}/retry" method="post" class="notice error"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ job.kind }} stopped after {{ job.attempts }} attempt(s)</strong><p>{{ job.last_error }}</p></div><button class="btn sm">Retry</button></form>{% endfor %}
+  {% if queue %}<p class="muted" style="font-size:13px">{% for kind, states in queue.items() %}{{ kind }}: {% for name, count in states.items() %}{{ name }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% elif not failed_jobs %}<p class="muted" style="font-size:13px">No background work recorded.</p>{% endif %}
+</section>
 {% endblock %}
+{% block scripts %}<script>if (location.hash === '#compose') document.getElementById('compose-message')?.focus();</script>{% endblock %}

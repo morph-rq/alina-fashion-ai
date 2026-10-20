@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Create seasonal table - {{ app_name }}{% endblock %}
+{% block title %}New season with many brands{% endblock %}
 {% block content %}
-<section class="page-head season-builder-head">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/brands">Brands</a><span aria-hidden="true">/</span><span>New season</span></nav>
+<header class="page-header">
   <div>
-    <p class="eyebrow">Guided setup</p>
-    <h1>Create new seasonal table</h1>
-    <p>Enter only source facts. The preview checks every row and calculates totals with Decimal before anything is saved.</p>
+    <h1>Create a seasonal table</h1>
+    <p class="page-sub">Enter only source facts. The preview checks every row and calculates the totals before anything is saved; creation is all or nothing.</p>
   </div>
-  <div class="builder-steps" aria-label="Creation steps"><span class="active">1 · Facts</span><span>2 · Preview</span><span>3 · Create</span></div>
-</section>
+  <div class="builder-steps" aria-label="Creation steps"><span class="{{ '' if draft else 'active' }}">1 · Facts</span><span class="{{ 'active' if draft and not draft.can_create else '' }}">2 · Preview</span><span class="{{ 'active' if draft and draft.can_create else '' }}">3 · Create</span></div>
+</header>
 
 {% if draft and draft.errors %}
 <section class="builder-message error" role="alert">
@@ -28,7 +28,7 @@
   <section class="panel builder-section">
     <div class="section-number">01</div>
     <div class="section-content">
-      <div class="panel-head"><div><p class="eyebrow">Season and customer</p><h2>Name the workspace</h2></div><span class="muted">Required source facts</span></div>
+      <div class="panel-head"><div><h2>Name the workspace</h2></div><span class="muted">Required source facts</span></div>
       <div class="builder-grid four">
         <label>Season name<input name="season_name" value="{{ values.get('season_name', '') }}" placeholder="FW26" maxlength="30" required><small>A new, unique season.</small></label>
         <label>Primary customer code<input name="primary_customer_code" value="{{ values.get('primary_customer_code', '') }}" placeholder="For example MB" maxlength="20" required><small>Used only for bulk spreadsheet matching.</small></label>
@@ -42,7 +42,7 @@
   <section class="panel builder-section">
     <div class="section-number">02</div>
     <div class="section-content">
-      <div class="panel-head"><div><p class="eyebrow">Brand + Season rules</p><h2>Add the brand tables</h2></div><span class="muted">One source of truth for every rule</span></div>
+      <div class="panel-head"><div><h2>Add the brand tables</h2></div><span class="muted">One source of truth for every rule</span></div>
       <div class="two-col builder-split">
         <label class="block-label">Brands <span>required · one per line: Brand | markup %</span><textarea name="brand_rows" rows="8" placeholder="Loro Piana Woman | 35&#10;Balenciaga Main | 30" required>{{ values.get('brand_rows', '') }}</textarea></label>
         <div class="rule-grid">
@@ -61,7 +61,7 @@
   <section class="panel builder-section">
     <div class="section-number">03</div>
     <div class="section-content">
-      <div class="panel-head"><div><p class="eyebrow">Fast product entry</p><h2>Paste rows from Excel</h2></div><span class="muted">Optional now · editable later</span></div>
+      <div class="panel-head"><div><h2>Paste rows from Excel</h2></div><span class="muted">Optional now · editable later</span></div>
       <div class="paste-guide"><code>Brand → Customer → Article → Product → Color → Size → Quantity → Wholesale Price → Markup %</code><button class="button small-button" type="button" data-copy-sample>Copy sample</button></div>
       <label class="block-label"><span>Paste tab-separated cells directly from Excel. Customer may be blank to use the primary customer.</span><textarea class="bulk-paste" name="product_rows" rows="10" placeholder="{{ sample_products }}">{{ values.get('product_rows', '') }}</textarea></label>
       <p class="muted">Every row must have a listed brand, a known customer, quantity of at least 1, and a positive wholesale price. Duplicate allocations are stopped rather than guessed.</p>
@@ -71,7 +71,7 @@
   <section class="panel builder-section">
     <div class="section-number">04</div>
     <div class="section-content">
-      <div class="panel-head"><div><p class="eyebrow">Managed product images</p><h2>Upload, then choose the product</h2></div><span class="muted">Optional · no renaming required</span></div>
+      <div class="panel-head"><div><h2>Upload, then choose the product</h2></div><span class="muted">Optional · no renaming required</span></div>
       <label class="image-dropzone">
         <input type="file" name="images" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple>
         <span class="drop-icon">＋</span><strong>Select product images</strong><small>Any filename is accepted. An exact SKU filename such as <code>FAQ9434.jpg</code> attaches automatically; otherwise choose from searchable suggestions. JPG, PNG, or WEBP; maximum 12 MB each.</small>
@@ -91,7 +91,7 @@
 
 {% if draft %}
 <section class="panel preview-panel" id="preview">
-  <div class="panel-head"><div><p class="eyebrow">Deterministic preview</p><h2>{{ draft.season_name or 'New season' }}</h2></div><span class="status {{ 'warning' if draft.errors else '' }}">{{ draft.errors|length }} errors</span></div>
+  <div class="panel-head"><div><h2>{{ draft.season_name or 'New season' }}</h2></div><span class="status {{ 'warning' if draft.errors else '' }}">{{ draft.errors|length }} errors</span></div>
   {% if draft.brands %}
   <div class="kpis small preview-kpis"><article><span>Brand tables</span><strong>{{ draft.brands|length }}</strong></article><article><span>Product rows</span><strong>{{ draft.products|length }}</strong></article><article><span>Order total</span><strong>{{ draft.order_total|money }}</strong></article><article><span>Initial due</span><strong>{{ draft.initial_due|money }}</strong></article></div>
   <div class="table-scroll"><table class="data-table"><thead><tr><th>Brand</th><th>Markup</th><th>Initial</th><th>Ready</th><th>Transport</th><th>Exempt</th><th>Receipt days</th></tr></thead><tbody>{% for brand in draft.brands %}<tr><th>{{ brand.name }}</th><td>{{ brand.markup_percentage|percent }}</td><td>{{ brand.initial_percentage|percent }}</td><td>{{ brand.ready_percentage|percent }}</td><td>{{ brand.transport_percentage|percent }}</td><td>{{ brand.exempt_countries }}</td><td>{{ brand.receipt_days }}</td></tr>{% endfor %}</tbody></table></div>
@@ -100,9 +100,9 @@
   <h3>Product rows</h3><div class="table-scroll"><table class="data-table"><thead><tr><th>Row</th><th>Image</th><th>Brand</th><th>Customer</th><th>Article / product</th><th>Size</th><th>Qty</th><th>Wholesale</th><th>Markup</th><th>Final</th><th>Initial due</th></tr></thead><tbody>{% for row in draft.products %}{% set matched_image = image_by_row.get(row.source_row) %}<tr><td>{{ row.source_row }}</td><td>{% if matched_image %}<img class="preview-thumb" src="/staged-images/{{ staged_image_token }}/{{ matched_image.stored_filename }}" alt="{{ matched_image.original_filename }}">{% else %}<span class="no-image">—</span>{% endif %}</td><td>{{ row.brand_name }}</td><td>{{ row.customer_code }}</td><td class="text">{{ row.article or '-' }} · {{ row.name or '-' }}</td><td>{{ row.size or '-' }}</td><td>{{ row.quantity }}</td><td>{{ row.wholesale_unit_price|money }}</td><td>{{ row.markup_percentage|percent }}</td><td class="calculated">{{ row.final_total|money }}</td><td class="calculated">{{ row.initial_due|money }}</td></tr>{% endfor %}</tbody></table></div>
   {% endif %}
   {% for warning in draft.warnings %}<p class="builder-warning">{{ warning }}</p>{% endfor %}
-  {% if staged_image_token %}<form class="discard-staged" action="/staged-images/{{ staged_image_token }}/discard" method="post" onsubmit="return confirm('Discard the images staged for this preview? Product and season data have not been created.');"><input type="hidden" name="confirmation" value="DISCARD_STAGED_IMAGES"><button class="button" type="submit">Discard staged images</button><span>Removes preview uploads only.</span></form>{% endif %}
+  {% if staged_image_token %}<form class="discard-staged" action="/staged-images/{{ staged_image_token }}/discard" method="post" data-confirm="Discard the images staged for this preview? Product and season data have not been created."><input type="hidden" name="confirmation" value="DISCARD_STAGED_IMAGES"><button class="button" type="submit">Discard staged images</button><span>Removes preview uploads only.</span></form>{% endif %}
   {% if draft.can_create %}
-  <form action="/seasons" method="post" class="confirm-create">
+  <form action="/seasons" method="post" class="confirm-create" data-once>
     {% for key, value in values.items() %}{% if key in ['additional_customers', 'brand_rows', 'product_rows'] %}<textarea hidden name="{{ key }}">{{ value }}</textarea>{% else %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
     <input type="hidden" name="staged_image_token" value="{{ staged_image_token }}">
     <input type="hidden" name="image_assignments_json" value="{{ image_assignments|tojson|forceescape }}">
@@ -114,7 +114,6 @@
 </section>
 {% endif %}
 
-<section class="panel ai-ready-note"><div><span class="ai-mark">AI</span></div><div><p class="eyebrow">Future assistant ready</p><h2>AI may gather facts, never calculate money</h2><p>The intake contract is available at <code>/api/season-intake/schema</code>. A future assistant can ask for missing season, customer, brand, product, and rule facts; the deterministic calculation engine remains the only authority for financial values.</p></div></section>
 
 <script>
   const copyButton = document.querySelector('[data-copy-sample]');

@@ -1,6 +1,28 @@
 {% extends "base.html" %}
+{% block title %}Business rules{% endblock %}
 {% block content %}
-{% if request.query_params.get('ai_applied') %}<section class="manual-success"><span>✓</span><div><strong>Reviewed AI formula proposal applied</strong><p>All totals now use the confirmed rule values, and the change is in Audit history.</p></div></section>{% endif %}
-<section class="page-head"><div><p class="eyebrow">Configuration by Brand + Season</p><h1>Financial rules</h1><p>Changing a future season does not alter historical item prices or another season's rules.</p></div></section>
-<section class="panel"><div class="table-scroll"><table class="data-table edit-table"><thead><tr><th>Season</th><th>Brand</th><th>Markup %</th><th>Initial %</th><th>Ready %</th><th>Transport %</th><th>Special cost</th><th>Exempt countries</th><th>Receipt days</th><th>Readiness logic</th><th>Notes</th><th></th></tr></thead><tbody>{% for rule in rules %}<tr><th>{{ rule.season.name }}</th><th>{{ rule.brand.name }}</th><td><input form="rule-{{ rule.id }}" name="markup" value="{{ rule.markup_percentage * 100 }}"></td><td><input form="rule-{{ rule.id }}" name="initial" value="{{ rule.initial_prepayment_percentage * 100 }}"></td><td><input form="rule-{{ rule.id }}" name="ready" value="{{ rule.ready_balance_percentage * 100 }}"></td><td><input form="rule-{{ rule.id }}" name="transport" value="{{ rule.transport_percentage * 100 }}"></td><td><input form="rule-{{ rule.id }}" name="special_cost" value="{{ rule.special_cost }}"></td><td><input form="rule-{{ rule.id }}" name="exempt_countries" value="{{ rule.transport_exempt_country_codes }}"></td><td><input form="rule-{{ rule.id }}" type="number" name="receipt_days" value="{{ rule.expected_receipt_days }}"></td><td><select form="rule-{{ rule.id }}" name="readiness_payment_logic"><option value="ready_batch_only" {{ 'selected' if rule.readiness_payment_logic == 'ready_batch_only' else '' }}>Ready batch only</option></select></td><td><input form="rule-{{ rule.id }}" name="notes" value="{{ rule.notes or '' }}"></td><td><form id="rule-{{ rule.id }}" method="post" action="/rules/{{ rule.id }}"><button class="button small-button">Save</button></form></td></tr>{% endfor %}</tbody></table></div></section>
+{% set season_filter = request.query_params.get('season_id', '') %}
+{% set seasons = rules|map(attribute='season')|unique(attribute='id')|list %}
+{% set shown = rules|selectattr('season_id', 'equalto', season_filter|int)|list if season_filter.isdigit() else rules %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/settings">Settings</a><span aria-hidden="true">/</span><span>Business rules</span></nav>
+<header class="page-header"><div><h1>Brand + Season rules</h1><p class="page-sub">One rule per brand and season. Changing a rule recalculates that season's charges but never rewrites historical item markup or another season's rules.</p></div></header>
+{% if request.query_params.get('ai_applied') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Reviewed AI formula proposal applied</strong><p>All totals now use the confirmed rule values, and the change is in the audit history.</p></div><a class="btn sm" href="/audit?entity=BrandSeasonRule">View history</a></div>{% endif %}
+{% if seasons|length > 1 %}<nav class="chips" aria-label="Filter by season"><a class="chip" href="/rules" {% if not season_filter %}aria-current="page"{% endif %}>All seasons</a>{% for s in seasons %}<a class="chip" href="/rules?season_id={{ s.id }}" {% if season_filter == s.id|string %}aria-current="page"{% endif %}>{{ s.name }}</a>{% endfor %}</nav>{% endif %}
+<div class="table-frame"><table class="table edit-table">
+  <thead><tr><th>Season</th><th>Brand</th><th>Markup %</th><th>Initial %</th><th>Ready %</th><th>Transport %</th><th>Special cost</th><th>Exempt countries</th><th>Receipt days</th><th>Readiness logic</th><th>Notes</th><th><span class="sr-only">Save</span></th></tr></thead>
+  <tbody>{% for rule in shown %}<tr>
+    <th>{{ rule.season.name }}</th><th>{{ rule.brand.name }}</th>
+    <td><input form="rule-{{ rule.id }}" name="markup" value="{{ (rule.markup_percentage * 100)|plain }}" aria-label="Markup percent" inputmode="decimal"></td>
+    <td><input form="rule-{{ rule.id }}" name="initial" value="{{ (rule.initial_prepayment_percentage * 100)|plain }}" aria-label="Initial percent" inputmode="decimal"></td>
+    <td><input form="rule-{{ rule.id }}" name="ready" value="{{ (rule.ready_balance_percentage * 100)|plain }}" aria-label="Ready percent" inputmode="decimal"></td>
+    <td><input form="rule-{{ rule.id }}" name="transport" value="{{ (rule.transport_percentage * 100)|plain }}" aria-label="Transport percent" inputmode="decimal"></td>
+    <td><input form="rule-{{ rule.id }}" name="special_cost" value="{{ rule.special_cost }}" aria-label="Special cost" inputmode="decimal"></td>
+    <td><input form="rule-{{ rule.id }}" name="exempt_countries" value="{{ rule.transport_exempt_country_codes }}" aria-label="Transport-exempt country codes"></td>
+    <td><input form="rule-{{ rule.id }}" type="number" name="receipt_days" value="{{ rule.expected_receipt_days }}" aria-label="Receipt days" class="tiny"></td>
+    <td><select form="rule-{{ rule.id }}" name="readiness_payment_logic" aria-label="Readiness payment logic"><option value="ready_batch_only" {{ 'selected' if rule.readiness_payment_logic == 'ready_batch_only' else '' }}>Ready batch only</option></select></td>
+    <td><input form="rule-{{ rule.id }}" name="notes" value="{{ rule.notes or '' }}" aria-label="Notes"></td>
+    <td><form id="rule-{{ rule.id }}" method="post" action="/rules/{{ rule.id }}" data-guard data-confirm="Save the {{ rule.season.name }} / {{ rule.brand.name }} rule? Charges for this season's {{ rule.brand.name }} products are recalculated."><button class="btn sm">Save</button></form></td>
+  </tr>{% else %}<tr class="table-empty"><td colspan="12">No rules yet. A rule is created with each brand table.</td></tr>{% endfor %}</tbody>
+</table></div>
+<p class="muted" style="font-size:13px;margin-top:10px">Initial and Ready percentages should add up to 100%. The AI Help assistant can propose a change; it is applied only when you confirm it. <a href="/audit?entity=BrandSeasonRule">Rule history</a></p>
 {% endblock %}

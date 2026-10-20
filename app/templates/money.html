@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Money{% endblock %}
+{% block content %}
+{% set sname = season.name if season else '' %}
+{% set here = '/money?season=' ~ (sname|urlencode) %}
+{% set unallocated = payments|selectattr('type', 'equalto', 'payment')|rejectattr('allocations')|list %}
+{{ ui.workspace_bar(season) }}
+<header class="page-header">
+  <div><h1>Money</h1><p class="page-sub">{% if season %}{{ season.name }}: customer payments, factory payments and seller credit, each in its own ledger.{% else %}Create a season first.{% endif %}</p></div>
+  <div class="page-actions">
+    {{ ui.season_select(seasons, season, action='/money') }}
+    {% if season %}
+    {% if is_newest %}<button class="btn primary" type="button" data-open="record-payment">{{ ui.icon('money') }}Record customer payment</button>
+    {% else %}<a class="btn primary" href="/money?season={{ newest.name|urlencode }}#do-record-payment">Record payment in {{ newest.name }}</a>{% endif %}
+    <details class="menu">
+      <summary class="btn">More<span class="chev">{{ ui.icon('chev') }}</span></summary>
+      <div class="menu-panel" role="menu">
+        <button class="menu-item" type="button" role="menuitem" data-open="factory-payment">{{ ui.icon('money') }}<span>Factory payment<small>Initial order or a Ready batch balance</small></span></button>
+        <div class="menu-sep" role="separator"></div>
+        <button class="menu-item" type="button" role="menuitem" data-open="seller-prepay">{{ ui.icon('money') }}<span>Seller prepayment<small>Actual money paid to a seller, with its bank reference</small></span></button>
+        <button class="menu-item" type="button" role="menuitem" data-open="credit-transfer">{{ ui.icon('layers') }}<span>Reuse seller credit in another group</span></button>
+        <button class="menu-item" type="button" role="menuitem" data-open="credit-settle">{{ ui.icon('check') }}<span>Settle credit or record a seller refund</span></button>
+      </div>
+    </details>
+    {% endif %}
+  </div>
+</header>
+
+{% set done_messages = {'payment': 'Customer payment recorded', 'factory': 'Factory payment recorded', 'prepay': 'Seller prepayment recorded', 'transfer': 'Credit transferred', 'settle': 'Settlement or refund recorded'} %}
+{% if request.query_params.get('done') in done_messages %}<div class="notice ok toast" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ done_messages[request.query_params.get('done')] }}</strong><p>The totals below already include it, and the change is in the audit history.</p></div></div>{% endif %}
+{% if data %}
+<div class="figures" style="--cols:4">
+  <a class="figure" href="#payments"><span class="figure-label">Received from customers</span><span class="figure-value">{{ data.account.total_paid|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">{% if data.account.outstanding > 0 %}{{ data.account.outstanding|moneynb }} still to collect{% elif data.account.overpayment > 0 %}{{ data.account.overpayment|moneynb }} paid in advance{% else %}Nothing outstanding{% endif %}</span></a>
+  <a class="figure {{ 'alert' if unallocated else '' }}" href="#payments"><span class="figure-label">Payments not allocated</span><span class="figure-value">{{ unallocated|length }}</span><span class="figure-sub">Not yet tied to initial or Ready</span></a>
+  <a class="figure" href="#factory"><span class="figure-label">Factory balance</span><span class="figure-value">{{ data.factory_account.outstanding|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">Paid {{ data.factory_paid|moneynb }} of {{ data.factory_required|moneynb }}</span></a>
+  <a class="figure" href="#seller-credit"><span class="figure-label">Held by sellers</span><span class="figure-value">{{ held|moneynb }}<span class="unit">{{ currency }}</span></span><span class="figure-sub">{{ available|moneynb }} available to reuse</span></a>
+</div>
+{% endif %}
+
+<nav class="chips" aria-label="On this page"><a class="chip" href="#payments">Customer payments <span class="n">{{ payments|length }}</span></a><a class="chip" href="#factory">Factory payments <span class="n">{{ factory_payments|length }}</span></a><a class="chip" href="#seller-credit">Seller credit <span class="n">{{ accounts|length }}</span></a></nav>
+
+<section class="section" id="payments" aria-labelledby="payments-title">
+  <div class="section-head"><div><h2 id="payments-title">Customer payments and refunds</h2><p>Each payment can be allocated to the initial prepayment or to a Ready batch balance. Refunds reduce the amount received.</p></div>
+    {% if season and is_newest %}<button class="btn sm" type="button" data-open="record-payment">Record payment</button>{% endif %}</div>
+  {% if season and not is_newest %}<div class="notice warn"><span class="notice-icon" aria-hidden="true">!</span><div><strong>New customer payments are recorded in {{ newest.name }}, the newest season.</strong><p>This ledger shows {{ season.name }}.</p></div></div>{% endif %}
+  <div class="table-frame"><table class="table stack-table">
+    <thead><tr><th>Date</th><th>Customer</th><th>Order</th><th>Type</th><th>Allocated to</th><th>Note</th><th class="num">Amount</th></tr></thead>
+    <tbody>{% for payment in payments %}{% set stage = payment.allocations[0].stage if payment.allocations else 'unallocated' %}<tr>
+      <td data-label="Date">{{ payment.date }}</td>
+      <td data-label="Customer">{% if payment.customer %}<a class="customer-chip" href="/customers/{{ payment.customer.id }}?season={{ sname|urlencode }}">{{ payment.customer.code }}</a>{% else %}—{% endif %}</td>
+      <td data-label="Order">{{ payment.order.brand.name if payment.order else '—' }}</td>
+      <td data-label="Type">{% if payment.type == 'refund' %}<span class="badge tone-warn">{{ payment_labels.get(payment.type, payment.type) }}</span>{% else %}{{ payment_labels.get(payment.type, payment.type) }}{% endif %}</td>
+      <td data-label="Allocated to">{% if stage == 'unallocated' %}<span class="badge tone-warn">not allocated</span>{% else %}{{ {'initial': 'Initial prepayment', 'ready': 'Ready balance'}.get(stage, stage) }}{% endif %}</td>
+      <td class="text" data-label="Note">{{ payment.note or '—' }}</td>
+      <td class="num" data-label="Amount">{{ signed_payment(payment.amount, payment.type)|money }}</td></tr>
+    {% else %}<tr class="table-empty"><td colspan="7">No customer payments{% if season %} in {{ season.name }}{% endif %} yet.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="section" id="factory" aria-labelledby="factory-title">
+  <div class="section-head"><div><h2 id="factory-title">Factory payments</h2><p>A separate ledger: customer receipts never pay a factory automatically.</p></div>{% if season %}<button class="btn sm" type="button" data-open="factory-payment">Record factory payment</button>{% endif %}</div>
+  {% if rows %}
+  <div class="table-frame" style="margin-bottom:14px"><table class="table">
+    <thead><tr><th>Ready batch</th><th class="num">Factory Ready due</th><th class="num">Paid</th><th class="num">Balance</th><th class="actions"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>{% for row in rows %}<tr><th>{{ row.batch.name }}</th><td class="num">{{ row.factory_due|money }}</td><td class="num">{{ row.factory_paid|money }}</td><td class="num">{% if row.factory_balance > 0 %}<span class="balance-due">{{ row.factory_balance|money }}</span>{% else %}{{ row.factory_balance|money }}{% endif %}</td>
+      <td class="actions"><button class="btn sm" type="button" data-open="factory-payment" data-set='{"stage": "ready", "ready_batch_id": "{{ row.batch.id }}"}'>Record payment</button></td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Date</th><th>Stage</th><th>Order</th><th>Ready batch</th><th>Note</th><th class="num">Amount</th></tr></thead>
+    <tbody>{% for payment in factory_payments %}<tr><td>{{ payment.date }}</td><td>{{ 'Initial order' if payment.stage == 'initial' else 'Ready balance' }}</td><td>{{ payment.order.brand.name if payment.order else 'Season level' }}</td><td>{{ payment.ready_batch.name if payment.ready_batch else '—' }}</td><td class="text">{{ payment.note or '—' }}</td><td class="num">{{ payment.amount|money }}</td></tr>
+    {% else %}<tr class="table-empty"><td colspan="6">No factory payments recorded{% if season %} for {{ season.name }}{% endif %}.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="section" id="seller-credit" aria-labelledby="credit-title">
+  <div class="section-head"><div><h2 id="credit-title">Seller credit</h2><p>Money paid to a seller stays with them until it is settled, refunded or explicitly reused. Customer receipts above are not assumed to be seller payments.</p></div>
+    <div class="btn-row"><button class="btn sm" type="button" data-open="seller-prepay">Record seller prepayment</button><button class="btn sm quiet" type="button" data-open="credit-transfer">Reuse credit</button><button class="btn sm quiet" type="button" data-open="credit-settle">Settle or refund</button></div></div>
+  <div class="table-frame" style="margin-bottom:14px"><table class="table">
+    <thead><tr><th>Account / group</th><th>Distributor</th><th>Seller</th><th>Customer / product</th><th class="num">Held</th><th>Use</th></tr></thead>
+    <tbody>{% for a in accounts %}<tr><td>#{{ a.id }} <a href="/logistics?focus=groups#group-{{ a.group_id }}">{{ a.group.name }}</a></td><td>{{ a.group.distributor.name if a.group.distributor else '—' }}</td><td>{{ a.group.seller }}</td><td>{{ a.customer.code if a.customer else 'Distributor funds' }}<small>{{ a.item.article or a.item.name if a.item else 'Group-level account' }}</small></td><td class="num">{{ balances[a.id]|money }}</td><td>{% if reusable(a) %}<span class="badge tone-ok">Reusable</span>{% else %}<span class="badge">Reserved for this group or product</span>{% endif %}</td></tr>
+    {% else %}<tr class="table-empty"><td colspan="6">No seller prepayments recorded. No balance is guessed from the workbook.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <details class="panel"><summary><strong>Seller payment and transfer history</strong> <span class="muted">({{ entries|length }})</span></summary>
+    <div class="table-frame" style="margin-top:12px"><table class="table">
+      <thead><tr><th>Date</th><th>Account</th><th>Operation</th><th>Stage</th><th class="num">Movement</th><th>Reference</th></tr></thead>
+      <tbody>{% for e in entries %}<tr><td>{{ e.date }}</td><td>#{{ e.account_id }} · {{ e.account.group.name }}</td><td>{{ e.kind }}</td><td>{{ e.stage or '—' }}</td><td class="num">{{ e.amount|money }}</td><td class="text">{{ e.reference }}</td></tr>
+      {% else %}<tr class="table-empty"><td colspan="6">New movements appear here. Entries cannot be edited or deleted.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+</section>
+
+{% if season and is_newest %}
+{% call ui.drawer('record-payment', 'Record a customer payment', 'Recorded in ' ~ sname ~ '. Allocate it now or leave it for review.') %}
+<form action="/payments" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="next" value="{{ here }}&amp;focus=payments&amp;done=payment">
+  <label class="wide">Customer<select name="customer_id" required><option value="">Choose a customer…</option>{% for customer in customers %}<option value="{{ customer.id }}">{{ customer.code }}{{ ' · ' ~ customer.name if customer.name }}</option>{% endfor %}</select></label>
+  <label>Date<input type="date" name="payment_date" required></label>
+  <label>Amount ({{ currency }})<input type="number" min="0.01" step="0.01" name="amount" required></label>
+  <label>Type<select name="type"><option value="payment">Payment received</option><option value="refund">Refund to the customer</option></select></label>
+  <label>Allocate to<select name="stage"><option value="unallocated">Not yet (review later)</option><option value="initial">Initial prepayment</option><option value="ready">Ready balance</option></select></label>
+  <label>Factory / brand order<select name="order_id"><option value="">Several orders or later</option>{% for order in orders %}<option value="{{ order.id }}">{{ order.brand.name }} / {{ order.season.name }}</option>{% endfor %}</select></label>
+  <label>Ready batch<select name="ready_batch_id"><option value="">None</option>{% for batch in ready_batches %}<option value="{{ batch.id }}">{{ batch.name }}</option>{% endfor %}</select><small>Required for a Ready balance.</small></label>
+  <label class="wide">Note<textarea name="note" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Record payment</button></div>
+</form>
+{% endcall %}
+{% endif %}
+{% if season %}
+{% call ui.drawer('factory-payment', 'Record a factory payment', 'Money paid to a factory for ' ~ sname ~ '.') %}
+<form action="/factory-payments" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="season_name" value="{{ sname }}"><input type="hidden" name="next" value="{{ here }}&amp;focus=factory&amp;done=factory">
+  <label>Stage<select name="stage"><option value="initial">Initial combined order</option><option value="ready">Ready batch balance</option></select></label>
+  <label>Ready batch<select name="ready_batch_id"><option value="">Initial / none</option>{% for row in rows %}<option value="{{ row.batch.id }}">{{ row.batch.name }}</option>{% endfor %}</select><small>Required for a Ready balance.</small></label>
+  <label class="wide">Factory / brand order<select name="order_id"><option value="">Season level, allocate later</option>{% for order in orders %}<option value="{{ order.id }}">{{ order.brand.name }} / {{ order.season.name }}</option>{% endfor %}</select></label>
+  <label>Date<input type="date" name="payment_date" required></label>
+  <label>Amount ({{ currency }})<input type="number" min="0.01" step="0.01" name="amount" required></label>
+  <label class="wide">Note<textarea name="note" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Record factory payment</button></div>
+</form>
+{% endcall %}
+{% endif %}
+{% call ui.drawer('seller-prepay', 'Record a seller prepayment', 'Actual money paid to the seller of a shipment group, confirmed by a bank reference.') %}
+<form action="/credits/prepay" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="token" value="{{ token }}-receipt"><input type="hidden" name="next" value="{{ here }}&amp;focus=seller-credit&amp;done=prepay">
+  <label class="wide">Group<select name="group_id" id="credit-group" required><option value="">Choose a group…</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }} · {{ g.distributor.name if g.distributor else 'set distributor first' }} / {{ g.seller or 'set seller first' }}</option>{% endfor %}</select></label>
+  <label class="wide">Product (optional)<select name="item_id" id="credit-item"><option value="">Whole group or customer account</option>{% for row in sheet_rows %}<option value="{{ row.item.id }}" data-group="{{ row.item.purchase_group_id }}">#{{ row.item.id }} {{ row.item.article or row.item.name }} · {{ row.item.customer.code if row.item.customer else 'unallocated' }}</option>{% endfor %}</select><small>For a mixed group, attach money to the not-completed product it may be reused for.</small></label>
+  <label class="wide">Credit owner, if paid for one customer<select name="customer_id"><option value="">Distributor funds, or the selected product's customer</option>{% for c in customers %}<option value="{{ c.id }}">{{ c.code }}{{ ' · ' ~ c.name if c.name }}</option>{% endfor %}</select></label>
+  <label>Stage<select name="stage"><option value="initial">Initial prepayment</option><option value="shipment">Shipment prepayment (incl. transport)</option><option value="other">Other or historical</option></select></label>
+  <label>Actual amount ({{ currency }})<input name="amount" type="number" step=".01" min=".01" required></label>
+  <label>Payment date<input name="payment_date" type="date" value="{{ today }}" required></label>
+  <label>Bank or payment reference<input name="reference" required maxlength="500" placeholder="Transfer reference or receipt"></label>
+  <div class="form-actions"><button class="btn primary">Record prepayment</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('credit-transfer', 'Reuse seller credit', 'Moves credit of a not-completed product to another group with the same seller, distributor and customer. Both sides are recorded together.') %}
+<form action="/credits/transfer" method="post" class="form-grid one" data-once data-guard>
+  <input type="hidden" name="token" value="{{ token }}-transfer"><input type="hidden" name="next" value="{{ here }}&amp;focus=seller-credit&amp;done=transfer">
+  <label>Available credit<select name="source_id" required><option value="">Choose an account…</option>{% for a in accounts if reusable(a) and balances[a.id] > 0 %}<option value="{{ a.id }}">#{{ a.id }} {{ a.group.name }} · {{ a.customer.code if a.customer else 'distributor funds' }} · {{ balances[a.id]|money }} {{ currency }}</option>{% endfor %}</select></label>
+  <label>Target group<select name="target_group_id" required><option value="">Same seller, distributor and customer…</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }} / {{ g.seller or 'no seller' }}</option>{% endfor %}</select></label>
+  <label>Amount ({{ currency }})<input name="amount" type="number" step=".01" min=".01" required></label>
+  <label>Reason or reference<input name="reference" required maxlength="500"></label>
+  <p class="form-note">A transfer does not create a new payment, and the original product stays visible.</p>
+  <div class="form-actions"><button class="btn primary">Transfer credit</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('credit-settle', 'Settle credit or record a seller refund', 'Use when the seller applied the money to a final invoice, or paid it back.') %}
+<form action="/credits/settle" method="post" class="form-grid one" data-once data-guard>
+  <input type="hidden" name="token" value="{{ token }}-settle"><input type="hidden" name="next" value="{{ here }}&amp;focus=seller-credit&amp;done=settle">
+  <label>Account<select name="account_id" required><option value="">Choose an account…</option>{% for a in accounts if balances[a.id] > 0 %}<option value="{{ a.id }}">#{{ a.id }} {{ a.group.name }} · {{ balances[a.id]|money }} {{ currency }}</option>{% endfor %}</select></label>
+  <label>What happened<select name="kind"><option value="settlement">Applied to the seller's final invoice</option><option value="refund">The seller refunded the money</option></select></label>
+  <label>Amount ({{ currency }})<input name="amount" type="number" step=".01" min=".01" required></label>
+  <label>Invoice or refund reference<input name="reference" required maxlength="500"></label>
+  <div class="form-actions"><button class="btn primary">Record</button></div>
+</form>
+{% endcall %}
+{% endblock %}
+{% block scripts %}<script>
+(() => {
+  const group = document.getElementById('credit-group'), item = document.getElementById('credit-item');
+  if (!group || !item) return;
+  const filter = () => { item.value = ''; [...item.options].forEach(option => { if (option.value) { option.hidden = option.dataset.group !== group.value; option.disabled = option.hidden; } }); };
+  group.addEventListener('change', filter); filter();
+})();
+</script>{% endblock %}

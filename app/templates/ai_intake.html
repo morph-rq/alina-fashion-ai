@@ -1,20 +1,17 @@
 {% extends "base.html" %}
-{% block title %}AI order intake - {{ app_name }}{% endblock %}
+{% block title %}Quick AI draft table{% endblock %}
 {% block content %}
-<section class="page-head ai-intake-head">
-  <div>
-    <p class="eyebrow">AI workspace</p>
-    <h1>Turn sources into an order table</h1>
-    <p>Write a note, attach source files, or dictate with your voice. AI reads images and documents, then builds a table for you to review.</p>
-  </div>
-</section>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/inbox">Inbox</a><span aria-hidden="true">/</span><span>Quick AI draft table</span></nav>
+<header class="page-header">
+  <div><h1>Quick AI draft table</h1><p class="page-sub">Write a note, attach files or dictate. AI reads images and documents and drafts one editable row per product; you confirm and save each row. For a conversation that keeps drafts and questions, use a <a href="/inbox#compose">new intake</a>.</p></div>
+</header>
 
-{% if error %}<section class="builder-message error" role="alert"><div><strong>Draft not created</strong><p>{{ error }}</p><a class="button" href="/ai-intake#multimodal-intake-form">Change source / try again →</a><a class="button" href="/excel">Use Excel template</a></div></section>{% endif %}
+{% if error %}<section class="builder-message error" role="alert"><div><strong>Draft not created</strong><p>{{ error }}</p><a class="button" href="/ai-intake#multimodal-intake-form">Change the source and try again</a><a class="button" href="/excel">Use Excel template</a></div></section>{% endif %}
 {% if warning %}<section class="builder-message error"><div><strong>Note</strong><p>{{ warning }}</p></div></section>{% endif %}
 
 {% if not seasons %}
 <section class="ai-first-season">
-  <div class="ai-first-season-copy"><span class="ai-spark">AI</span><div><p class="eyebrow">One-time setup</p><h2>Start with the season</h2><p>Only the season is required. You can type or dictate the customer and brand later in the AI intake.</p></div></div>
+  <div class="ai-first-season-copy"><span class="ai-spark">AI</span><div><h2>Start with the season</h2><p>Only the season is required. You can type or dictate the customer and brand later in the AI intake.</p></div></div>
   {% if quick_error %}<div class="quick-error" role="alert"><strong>Please check this:</strong> {{ quick_error }}</div>{% endif %}
   <form class="quick-season-form ai-season-form" action="/seasons/quick-create" method="post">
     <input type="hidden" name="next_path" value="/ai-intake">
@@ -22,14 +19,14 @@
     <label>First brand <span class="muted">optional</span><input name="brand_name" list="brand-catalog" value="{{ quick_values.get('brand_name', '') }}" placeholder="Or provide it in the AI note"><small>Choose now, or let AI extract it from the order information.</small></label>
     <label>Customer name <span class="muted">optional</span><input name="customer_name" value="{{ quick_values.get('customer_name', '') }}" placeholder="Or provide it in the AI note"><small>You can leave this blank and dictate the customer later.</small></label>
     <details class="quick-season-options"><summary>Optional business settings</summary><div><label>Customer code<input name="customer_code" value="{{ quick_values.get('customer_code', '') }}" placeholder="Created automatically"><small>Leave blank—the app makes a unique code from the name.</small></label><label>Destination country<input name="country_code" value="{{ quick_values.get('country_code', '') }}" placeholder="IT" maxlength="2"></label><label>Default markup %<input type="number" min="0" max="100" step="0.01" name="default_markup" value="{{ quick_values.get('default_markup', '35') }}"></label></div></details>
-    <button class="button primary large-button" type="submit">Create season and continue with AI →</button>
+    <button class="button primary large-button" type="submit">Create season and continue with AI</button>
   </form>
 </section>
 {% else %}
 {% if request.query_params.get('season_created') %}<section class="manual-success ai-season-success" role="status"><span>✓</span><div><strong>{{ request.query_params.get('season_created') }} is ready</strong><p>Describe, dictate, or attach the first order below.</p></div></section>{% endif %}
 <section class="panel ai-intake-compose">
   <div class="panel-head">
-    <div><p class="eyebrow">New intake</p><h2>What would you like to add?</h2></div>
+    <div><h2>What would you like to add?</h2></div>
     <span class="source-fact-note">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
       Calculations stay rule-based
@@ -83,19 +80,19 @@
 
 {% if source_summary or follow_up_questions %}
 <section class="panel intake-source-summary">
-  <div class="panel-head"><div><p class="eyebrow">Extraction summary</p><h2>What AI understood</h2></div></div>
+  <div class="panel-head"><div><h2>What AI understood</h2></div></div>
   {% if source_summary %}<p>{{ source_summary }}</p>{% endif %}
   {% if follow_up_questions %}<h3>Questions to resolve</h3><ul>{% for question in follow_up_questions %}<li>{{ question }}</li>{% endfor %}</ul>{% endif %}
 </section>
 {% endif %}
 
 {% if drafts %}
-<section class="wb-card ai-table-panel"><div class="panel-head"><div><p class="eyebrow">REVIEW BEFORE SAVING</p><h2>{{ drafts|length }} product rows from your source</h2><p>Images are read as evidence, not displayed as product photos. Yellow = in process · green = done · white = not completed. Confirm the source status; no payments are inferred.</p></div><a class="button" href="/excel">Excel files →</a></div>
+<section class="wb-card ai-table-panel"><div class="panel-head"><div><h2>{{ drafts|length }} product rows from your source</h2><p>Images are read as evidence, not displayed as product photos. Yellow = in process · green = done · white = not completed. Confirm the source status; no payments are inferred.</p></div><a class="button" href="/excel">Edit in Excel</a></div>
 <div class="wb-table-scroll"><table class="wb-table ai-draft-table"><thead><tr><th>Row / source checks</th><th>Customer *</th><th>Brand / season</th><th>Article / product *</th><th>Color / size *</th><th>Qty *</th><th>Price / meaning *</th><th>More details</th><th>Save</th></tr></thead><tbody>
 {% for draft in drafts %}{% set facts=draft.facts %}{% set best=draft.matches[0] if draft.matches else None %}{% set fid='ai-row-' ~ loop.index %}
 <tr id="draft-{{ loop.index }}" class="ai-draft-row" data-worksheet-state="{{ facts.worksheet_status or 'pending' }}">
 <td><form id="{{ fid }}" action="/ai-intake/confirm" method="post" class="ai-review-form" data-draft-number="{{ loop.index }}"><input type="hidden" name="season_name" value="{{ selected_season }}"><input type="hidden" name="confirmation_token" value="{{ draft.confirmation_token }}"><input type="hidden" name="source_bundle_token" value="{{ draft.source_bundle_token }}"><textarea hidden name="source_text">{{ message }}{% if source_summary %}
-{{ source_summary }}{% endif %}</textarea></form><strong>Row {{ loop.index }}</strong>{% for issue in facts.missing_or_ambiguous %}<p class="wb-flag">{{ issue }}</p>{% else %}<small>Check against the source</small>{% endfor %}<button type="button" class="button tiny-button" data-fix-row>Check this row →</button><small>{{ facts.source_attachment_names|join(', ') }}</small><a href="/intake-sources/{{ draft.source_bundle_token }}" target="_blank" rel="noopener">Check saved source →</a></td>
+{{ source_summary }}{% endif %}</textarea></form><strong>Row {{ loop.index }}</strong>{% for issue in facts.missing_or_ambiguous %}<p class="wb-flag">{{ issue }}</p>{% else %}<small>Check against the source</small>{% endfor %}<button type="button" class="button tiny-button" data-fix-row>Check this row</button><small>{{ facts.source_attachment_names|join(', ') }}</small><a href="/intake-sources/{{ draft.source_bundle_token }}" target="_blank" rel="noopener">Check saved source</a></td>
 <td><label>Name<input form="{{ fid }}" name="customer_name" value="{{ facts.customer_name or '' }}" required data-customer-name></label><label>Code<input form="{{ fid }}" name="customer_code" value="{{ draft.suggested_code }}" readonly></label><small>Automatic from the first and last name.</small></td>
 <td><label>Brand<input form="{{ fid }}" name="brand_name" value="{{ facts.brand or '' }}"></label><label>Brand table<select form="{{ fid }}" name="order_id"><option value="">Create from brand name</option>{% for order in orders %}<option value="{{ order.id }}" {{ 'selected' if draft.suggested_order_id == order.id }}>{{ order.brand.name }} · {{ order.season.name }}</option>{% endfor %}</select></label><small>{{ selected_season }} · {{ draft.order_suggestion_reason }}</small></td>
 <td><label>Article / SKU<input form="{{ fid }}" name="article" value="{{ facts.article or (best.item.article if best else '') or '' }}"></label><label>Product<input form="{{ fid }}" name="product_name" value="{{ facts.product_name or (best.item.name if best else '') or '' }}" required></label></td>
@@ -105,7 +102,7 @@
 <td><details><summary>Contact, costs & delivery</summary><label>Phone<input form="{{ fid }}" name="customer_phone" value="{{ facts.customer_phone or '' }}"></label><label>Country<input form="{{ fid }}" name="country_code" maxlength="2" value="{{ facts.destination_country_code or '' }}"></label><label>New brand markup %<input form="{{ fid }}" type="number" min="0" max="100" step="0.01" name="new_brand_markup" value="35"></label><label>Selling unit override<input form="{{ fid }}" type="number" min="0" step="0.01" name="selling_unit_price" placeholder="Automatic"></label><small>Override requires stated price = wholesale.</small><label>Deliver by<input form="{{ fid }}" type="date" name="requested_delivery_date" value="{{ facts.requested_delivery_date or '' }}"></label><label>Logistics<input form="{{ fid }}" name="logistics_preference" value="{{ facts.logistics_preference or '' }}"></label><label>Requirements<textarea form="{{ fid }}" name="customer_requirements">{% if facts.height_cm %}Height: {{ facts.height_cm }} cm. {% endif %}{% if facts.weight_kg %}Weight: {{ facts.weight_kg }} kg. {% endif %}{{ facts.body_notes or '' }} {{ facts.contact_instructions or '' }}</textarea></label><label><input form="{{ fid }}" type="checkbox" name="contact_on_pdf_send" value="true" {{ 'checked' if facts.contact_instructions }}> Record contact reminder (does not send)</label></details></td>
 <td><label>Worksheet status<select form="{{ fid }}" name="worksheet_state" data-draft-state><option value="pending" {{ 'selected' if not facts.worksheet_status or facts.worksheet_status == 'pending' }}>Not completed</option><option value="process" {{ 'selected' if facts.worksheet_status == 'process' }}>In process</option><option value="done" {{ 'selected' if facts.worksheet_status == 'done' }}>Done</option></select></label><button form="{{ fid }}" class="button primary" type="button" data-save-here>Save row</button><span class="draft-save-status" role="status">Not saved</span></td>
 </tr>{% endfor %}</tbody></table></div>
-<div class="batch-save-bar"><div><strong>Confirm the rows, then save</strong><p>All required fields are checked first. If a server check fails, saved rows stay marked and only unsaved rows are retried.</p></div><div><button class="button primary" id="save-all-drafts" type="button">Save all reviewed rows</button><span id="batch-save-status" role="status"></span><a class="button" href="/worksheet">Open workbook →</a></div></div></section>
+<div class="batch-save-bar"><div><strong>Confirm the rows, then save</strong><p>All required fields are checked first. If a server check fails, saved rows stay marked and only unsaved rows are retried.</p></div><div><button class="button primary" id="save-all-drafts" type="button">Save all reviewed rows</button><span id="batch-save-status" role="status"></span><a class="button" href="/worksheet">Open Products</a></div></div></section>
 {% endif %}
 
 <script>

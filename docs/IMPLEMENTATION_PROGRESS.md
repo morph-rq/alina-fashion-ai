@@ -14,8 +14,9 @@ tests; **no real Google account has been connected**.
   repository now records every stage (`git log`); business data is git-ignored.
 * Test baseline: 108 passed, 1 failed (outdated library assertion). With the workspace `.env` credentials
   most route tests returned 401; `tests/conftest.py` now isolates settings, database, secrets and folders.
-* Run tests: `& ..\alina-fashion\.venv\Scripts\python.exe -m pytest -q` (now **186 passed**).
-* Visual preview without login or live services: `python scripts\dev_preview.py` (127.0.0.1:8001 only).
+* Run tests: `& ..\alina-fashion\.venv\Scripts\python.exe -m pytest -q` (now **257 passed**).
+* Visual preview without login or live services: `python scripts\dev_preview.py` (127.0.0.1:8001 only), or
+  `python scripts\ui_preview.py` for a throw-away copy in `tmp/ui-preview` with synthetic records.
 
 ## Capability / migration map (main vs testing)
 
@@ -113,6 +114,20 @@ download; empty attachments made Gmail retries fail; reset removed connection se
 worker; a rejected access token was not refreshed; malformed separators were read as large amounts; zero
 final prices were accepted; inbox items started in the newest season silently; the backup fingerprint missed
 in-place edits.
+
+## Minimal interface (2026-10-20)
+
+* Four areas (Overview, Workspace, Inbox, Customers) replace 22 navigation links; Search, AI Help, Add and
+  Settings sit in the top bar. Workspace has one view switch (Products, Brands, Ready & shipping, Money).
+  New routes: `/logistics`, `/money`, `/brands`, `/settings` (`app/ui_routes.py`); navigation in
+  `app/navigation.py`; one style sheet `app/static/ui.css` and one script `app/static/app.js`.
+* Every old page URL redirects with its query; POST contracts are unchanged apart from an optional, same-site
+  `next` return target (`safe_next`). Feature map and checks: `docs/ui-feature-map.md`; operator version:
+  `docs/navigation-guide.md`.
+* Fixed on the way: stale intake receipt balances, Enter in intake questions, empty factory-order list,
+  shipment rule checkbox that could not be switched off, server error on a damaged image upload.
+* Open: System Check fails for an order without a Brand + Season rule (shown on Overview, backend unchanged);
+  payments, shipments and expenses still go to the newest season by design.
 
 ## Remaining work and decisions
 

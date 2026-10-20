@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{% set needs_reconnect = connections|selectattr('status', 'equalto', 'needs_reconnect')|list %}
+<header class="page-header"><div><h1>Settings</h1><p class="page-sub">Business rules, connections, backups and administration. Everyday work happens in Overview, Workspace, Inbox and Customers.</p></div></header>
+<div class="settings-groups">
+  <section class="settings-group" aria-labelledby="business-title">
+    <h2 id="business-title">Business</h2>
+    <div class="settings-list">
+      <a class="setting-link" href="/rules">{{ ui.icon('rules') }}<strong>Brand + Season rules</strong><p>Markup, initial and Ready percentages, transport and exemptions, special costs and receipt days.</p><span class="badge">{{ rule_count }} rule{{ '' if rule_count == 1 else 's' }}</span></a>
+      <a class="setting-link" href="/library">{{ ui.icon('link') }}<strong>Library and references</strong><p>Brands, season catalogues, product links, saved collections and stored documents.</p><span class="badge">{{ brand_count }} brand{{ '' if brand_count == 1 else 's' }}</span></a>
+    </div>
+  </section>
+  <section class="settings-group" aria-labelledby="connections-title">
+    <h2 id="connections-title">Connections</h2>
+    <div class="settings-list">
+      <a class="setting-link" href="/connections">{{ ui.icon('mail') }}<strong>Google Drive and Gmail</strong><p>Connect accounts, choose watched folders and mail queries, sync now, pause, backfill, and send exports or recovery archives to Drive.</p>
+        {% if needs_reconnect %}<span class="badge tone-danger">{{ needs_reconnect|length }} needs reconnecting</span>{% elif connections %}<span class="badge tone-ok">{{ connections|length }} connected</span>{% else %}<span class="badge">Not connected</span>{% endif %}</a>
+      <a class="setting-link" href="/inbox#sources">{{ ui.icon('inbox') }}<strong>Captured sources and sync state</strong><p>Every upload, Drive file and e-mail with its processing state, retries and ignored items.</p>{% if pending_outbox %}<span class="badge tone-warn">{{ pending_outbox }} outgoing waiting</span>{% endif %}</a>
+    </div>
+  </section>
+  <section class="settings-group" aria-labelledby="recovery-title">
+    <h2 id="recovery-title">Recovery</h2>
+    <div class="settings-list">
+      <a class="setting-link" href="/recovery">{{ ui.icon('shield') }}<strong>Backups and restore</strong><p>Verified snapshots, the recovery code, off-site copies and restore exercises.</p>
+        {% if recovery.unprotected %}<span class="badge tone-warn">Changes not yet backed up</span>{% elif recovery.last_local_at %}<span class="badge tone-ok">Last snapshot {{ recovery.last_local_at[:16].replace('T', ' ') }}</span>{% else %}<span class="badge tone-warn">No snapshot yet</span>{% endif %}</a>
+      <a class="setting-link" href="/workspace/reset">{{ ui.icon('trash') }}<strong>Clean-up and reset</strong><p>Remove a stored source file, reverse a Ready-list import, or reset the whole workspace after a verified snapshot.</p></a>
+    </div>
+  </section>
+  <section class="settings-group" aria-labelledby="history-title">
+    <h2 id="history-title">History and checks</h2>
+    <div class="settings-list">
+      <a class="setting-link" href="/audit">{{ ui.icon('history') }}<strong>Audit history</strong><p>Every recorded change, with source, previous and new values. Products and customers link to their own history.</p>{% if last_audit %}<span class="badge">Last change {{ last_audit.timestamp.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}</a>
+      <a class="setting-link" href="/validation">{{ ui.icon('check') }}<strong>System check</strong><p>Reconciliation errors and warnings, each with a suggested fix.</p></a>
+      <a class="setting-link" href="/import#import-changes">{{ ui.icon('upload') }}<strong>Imports and protected changes</strong><p>Master workbook imports, Import review and supplier changes held back for review.</p>{% if protected_changes %}<span class="badge tone-warn">{{ protected_changes }} to compare</span>{% endif %}</a>
+    </div>
+  </section>
+</div>
+{% endblock %}

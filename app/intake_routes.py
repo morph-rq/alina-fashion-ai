@@ -150,11 +150,10 @@ def install_intake(app, templates, context):
         return ids
 
     @app.get("/intake")
-    def intake_list(request: Request, db: Session = Depends(get_db)):
-        sessions = db.scalars(select(IntakeSession).order_by(IntakeSession.updated_at.desc()).limit(100)).all()
-        seasons = db.scalars(select(Season).order_by(Season.id.desc())).all()
-        return templates.TemplateResponse(request, "intake_list.html", context(request, sessions=sessions, seasons=seasons,
-                                                                                ai_configured=ai_intake.ai_configured()))
+    def intake_list(request: Request):
+        # Intakes and captured sources share one Inbox page.
+        query = request.url.query
+        return RedirectResponse("/inbox" + (f"?{query}" if query else ""), 303)
 
     @app.post("/intake")
     def intake_create(background: BackgroundTasks, season_id: int = Form(...), title: str = Form(""), message: str = Form(""),

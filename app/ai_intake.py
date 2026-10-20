@@ -681,13 +681,13 @@ def business_assistant(message: str, business_context: dict[str, Any]) -> Assist
     if not message.strip():
         raise ValueError("Ask a question first")
     if not ai_configured():
-        return AssistantReply(answer="AI Help is not connected right now. Use Home for common actions, To-do for anything requiring attention, or More tools for setup.")
+        return AssistantReply(answer="AI Help is not connected right now. Overview lists what needs attention, Add starts a product, payment or file, and Settings holds rules, connections and backups.")
     system = """You are a patient assistant inside a small fashion-order business app. Explain in very simple language.
 Use only the supplied business context for financial values. Never calculate or invent money yourself. The context contains a deterministic projected-profit calculation.
 If the user asks to change a formula, propose changes only for one listed rule_id and repeat the exact percentage values. Initial and ready percentages must total 100.
 If the user asks to download, export, or get an Excel/spreadsheet file, use only a download URL from context.exports and provide a short download label.
 Prefer the editable order workbook for normal Excel work; reserve the full accounting reference export for explicit accounting/report requests. Upload edits at /excel, not the original SS26 importer. Include the relevant suggested_page when explaining an issue.
-Never claim a proposal is already applied. Mention that the user must review and confirm it. Suggested pages must be one of /, /manual-entry, /ai-intake, /orders, /customers, /payments, /reports, /library, /rules, /operations.
+Never claim a proposal is already applied. Mention that the user must review and confirm it. Suggested pages must be one of /, /worksheet, /brands, /logistics, /money, /inbox, /manual-entry, /ai-intake, /customers, /reports, /excel, /validation, /settings, /rules, /library.
 Return JSON matching the schema."""
     parts = [{"text": json.dumps({"question": message.strip(), "context": business_context}, ensure_ascii=False, default=str)}]
     try:

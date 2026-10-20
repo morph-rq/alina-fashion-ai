@@ -1,1 +1,15 @@
-{% extends "base.html" %}{% block content %}<div class="wb-heading"><div><p class="eyebrow">CHECK BEFORE SAVING</p><h1>This change needs your attention.</h1></div></div><section class="wb-card"><p role="alert">{{ message }}</p><p class="wb-muted">The requested operation was not saved. Your existing products and payment history are unchanged.</p><div class="wb-actions"><button class="button primary" type="button" onclick="history.back()">← Back to the form</button><a class="button" href="/worksheet">Open workbook</a><a class="button" href="/validation">Issues & suggestions →</a><a class="button" href="/credits">Review seller credit</a></div></section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}{{ 'Not saved' if was_change is not defined or was_change else 'Not found' }}{% endblock %}
+{% block content %}
+{% set change = was_change is not defined or was_change %}
+<header class="page-header"><div><h1>{{ 'This change was not saved' if change else 'This page could not be opened' }}</h1></div></header>
+<section class="panel" style="max-width:760px">
+  <div class="notice error" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ message }}</strong>
+    <p>{% if change %}Nothing was changed: existing products, payments and history are exactly as before. Go back, correct the form and try again.{% else %}The record may have been removed, or the link is out of date.{% endif %}</p></div></div>
+  <div class="btn-row">
+    <button class="btn primary" type="button" onclick="history.back()">{{ 'Back to the form' if change else 'Go back' }}</button>
+    <a class="btn" href="/worksheet">Open Workspace</a>
+    <a class="btn quiet" href="/validation">Issues and suggestions</a>
+  </div>
+</section>
+{% endblock %}

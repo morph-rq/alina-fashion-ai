@@ -1,5 +1,9 @@
 # Current state and correction scope
 
+> Interface as of 2026-10-20: four areas (Overview, Workspace, Inbox, Customers) plus Settings. Page names
+> below (New table, dashboard, AI intake screen) are historical; see `navigation-guide.md` for where each
+> one is now. Old URLs still work.
+
 ## Added: guided seasonal table creation
 
 The app now has a **New table** workflow at `/seasons/new`. It validates a new season before saving, can copy matching Brand + Season rules from an earlier season, accepts customer and brand definitions, and supports tab-separated product rows pasted directly from Excel. The preview derives order totals and initial requirements without writing to the database. Final creation is all-or-nothing and records an audit event.

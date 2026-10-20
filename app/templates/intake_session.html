@@ -1,15 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ session.title }} · Intake{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/intake.css?v=20261018">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/inbox">Inbox</a><span aria-hidden="true">/</span><span>Intake</span></nav>
 <div class="intake-head">
-  <div><p class="eyebrow">Intake · {{ session.season.name if session.season else 'no season' }} · saved automatically</p>
-  <h1>{{ session.title }}</h1>
-  <span class="state state-{{ session.state }}">{{ session.state.replace('_', ' ') }}</span>{% if session.state_reason %} <small>{{ session.state_reason }}</small>{% endif %}</div>
-  <div><a class="button" href="/intake">All intakes</a> <a class="button" href="/inbox">Source inbox</a></div>
+  <div><h1>{{ session.title }}</h1>
+  <p class="page-sub" style="margin:0"><span class="state state-{{ session.state }}">{{ session.state.replace('_', ' ') }}</span> {{ session.season.name if session.season else 'No season' }} · saved automatically{% if session.state_reason %} · {{ session.state_reason }}{% endif %}</p></div>
+  <div class="btn-row"><a class="btn" href="/inbox">Back to Inbox</a></div>
 </div>
-{% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
-{% if session.state == 'analysing' %}<meta http-equiv="refresh" content="5"><p class="notice">Analysing your sources… this page refreshes by itself. Your files are already stored.</p>{% endif %}
+{% if error %}<div class="notice error" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
+{% if session.state == 'analysing' %}<noscript><meta http-equiv="refresh" content="5"></noscript><div class="notice info" role="status" data-auto-refresh><span class="notice-icon" aria-hidden="true">i</span><div><strong>Analysing your sources…</strong><p>Your files are already stored. This page refreshes itself while you are not typing.</p></div></div>{% endif %}
 <nav class="intake-tabs" aria-label="Intake sections"><a href="#conversation">Talk</a><a href="#draft">Draft</a><a href="#evidence">Evidence</a><a href="#review">Save</a></nav>
 <div class="intake-grid">
   <section class="intake-pane" id="conversation" aria-label="Conversation">
@@ -19,9 +18,11 @@
     </div>
     {% for question in questions %}
     <form class="question" action="/intake/{{ session.public_id }}/questions/{{ question.id }}" method="post">
-      <p>{{ question.text }}</p>
+      {# Pressing Enter in the text field submits the typed answer, not the first choice button. #}
+      <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Answer</button>
+      <p id="question-{{ question.id }}">{{ question.text }}</p>
       {% if options[question.id] %}<div class="choices">{% for option in options[question.id] %}<button class="button small-button" name="choice" value="{{ loop.index0 }}">{{ option.label }}</button>{% endfor %}</div>{% endif %}
-      <div class="free"><input name="text" aria-label="Type an answer" placeholder="Or type the answer"><button class="button small-button">Answer</button></div>
+      <div class="free"><input name="text" aria-label="Type an answer" aria-describedby="question-{{ question.id }}" placeholder="Or type the answer"><button class="button small-button">Answer</button></div>
     </form>
     {% endfor %}
     {% if more_questions %}<p class="muted">{{ more_questions }} more question(s) after these.</p>{% endif %}
@@ -129,6 +130,17 @@
         }).catch(function () { if (status) status.textContent = 'Offline: use Save row'; });
     });
   });
+  /* While sources are analysed, reload every 5 s, but never over something being typed. */
+  if (document.querySelector('[data-auto-refresh]')) {
+    window.setInterval(function () {
+      var active = document.activeElement;
+      var typing = active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName);
+      var edited = Array.prototype.some.call(document.querySelectorAll('textarea, input'), function (field) {
+        return field.type !== 'hidden' && field.type !== 'file' ? field.value !== field.defaultValue : field.type === 'file' && field.files && field.files.length > 0;
+      });
+      if (!typing && !edited) window.location.reload();
+    }, 5000);
+  }
 })();
 </script>
 {% endblock %}

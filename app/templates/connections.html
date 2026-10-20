@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Connections · {{ app_name }}{% endblock %}
+{% block title %}Google Drive and Gmail{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/intake.css?v=20261018">
-<section class="page-head"><div><p class="eyebrow">Google Drive · Gmail</p><h1>Connections</h1>
-<p>Bring selected evidence into the source inbox, send exports and encrypted recovery archives to Drive. Incoming items never post orders or payments by themselves: each one is reviewed in an intake and saved by you.</p></div>
-<div><a class="button" href="/inbox">Source inbox</a> <a class="button" href="/recovery">Recovery</a></div></section>
-{% if message %}<p class="notice">{{ message }}</p>{% endif %}{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/settings">Settings</a><span aria-hidden="true">/</span><span>Connections</span></nav>
+<header class="page-header"><div><h1>Google Drive and Gmail</h1>
+<p class="page-sub">Bring selected evidence into the Inbox, and send exports and encrypted recovery archives to Drive. Incoming items never post orders or payments by themselves: each one is reviewed in an intake and saved by you.</p></div>
+<div class="page-actions"><a class="btn" href="/inbox#sources">Captured sources</a><a class="btn quiet" href="/recovery">Backups</a></div></header>
+{% if message %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ message }}</strong></div></div>{% endif %}{% if error %}<div class="notice error" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
 <p class="muted">Syncing runs only while this app is running (polling every 15 minutes by default). After a stop it catches up from saved checkpoints at the next start.
 Background queue: {% for kind, states in queue.items() %}{{ kind }} {% for name, count in states.items() %}{{ name }} {{ count }}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}; {% endif %}{% else %}empty{% endfor %}.</p>
 
@@ -39,7 +39,7 @@ Background queue: {% for kind, states in queue.items() %}{{ kind }} {% for name,
 <form action="/connections/{{ connection.id }}/sync" method="post"><button class="button">Sync now</button></form>
 <form action="/connections/{{ connection.id }}/pause" method="post"><button class="button">{{ 'Resume' if connection.status == 'paused' else 'Pause' }}</button></form>
 <form action="/connections/google/start" method="post"><input type="hidden" name="connection_id" value="{{ connection.id }}"><input type="hidden" name="understood" value="1"><button class="button">Reconnect</button></form>
-<form action="/connections/{{ connection.id }}/disconnect" method="post"><input name="confirm" placeholder="Type DISCONNECT" required><button class="button danger">Disconnect</button></form>
+<form action="/connections/{{ connection.id }}/disconnect" method="post" class="inline-form"><input name="confirm" placeholder="Type DISCONNECT" required aria-label="Type DISCONNECT to confirm"><button class="button danger">Disconnect</button></form>
 </div></div>
 <table class="data-table"><thead><tr><th>Source / destination</th><th>Checkpoint</th><th>Last sync</th><th>Recent runs</th><th></th></tr></thead><tbody>
 {% for source in connection.sources %}<tr><td class="text"><strong>{{ source.name }}</strong><br><small>{{ source.kind.replace('_', ' ') }}{% if source.start_date %} · from {{ source.start_date }}{% endif %}{% if not source.active %} · paused{% endif %}</small>{% if source.last_error %}<br><small class="state state-failed">{{ source.last_error }}</small>{% endif %}</td>
@@ -47,7 +47,7 @@ Background queue: {% for kind, states in queue.items() %}{{ kind }} {% for name,
 <td>{{ source.last_success_at.strftime('%Y-%m-%d %H:%M') if source.last_success_at else '—' }}</td>
 <td><small>{% for run in runs.get(source.id, []) %}{{ run.started_at.strftime('%m-%d %H:%M') }} {{ run.status }}: {{ run.captured }} new, {{ run.duplicates }} known, {{ run.failed }} failed{% if run.note %} — {{ run.note }}{% endif %}<br>{% else %}no runs yet{% endfor %}</small></td>
 <td><form action="/connections/sources/{{ source.id }}/toggle" method="post"><button class="button small-button">{{ 'Pause' if source.active else 'Resume' }}</button></form>
-{% if source.kind == 'gmail_query' %}<form action="/connections/sources/{{ source.id }}/backfill" method="post"><input type="date" name="start_date" required><button class="button small-button">Backfill from date</button></form>{% endif %}</td></tr>
+{% if source.kind == 'gmail_query' %}<form action="/connections/sources/{{ source.id }}/backfill" method="post" class="inline-form" style="margin-top:6px"><input type="date" name="start_date" required aria-label="Backfill from date"><button class="button small-button">Backfill from date</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="5" class="muted">Nothing selected yet. Add an incoming source or a destination below.</td></tr>{% endfor %}
 </tbody></table>
 <details><summary>Add incoming evidence or a destination</summary>

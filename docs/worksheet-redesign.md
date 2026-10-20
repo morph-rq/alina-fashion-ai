@@ -61,6 +61,9 @@ in the UI. This is an accounting record; no bank transfer is initiated by the ap
 
 ## Backups and Google Drive
 
+The former Storage page is now **Settings → Recovery** (`/storage` redirects there); current Drive and Gmail
+setup is described in `drive-gmail-setup.md`, which supersedes the steps below.
+
 Storage creates versioned ZIP snapshots containing a consistent SQLite backup,
 source workbooks, stored product images, library uploads and generated reports.
 Each snapshot passes SQLite integrity, archive CRC and per-file SHA-256 checks.

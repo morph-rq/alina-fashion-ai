@@ -178,6 +178,11 @@ def test_upload_questions_correction_save_once_and_excel(env, monkeypatch):
         assert db.scalar(select(func.count()).select_from(OrderItem)) == 1
     receipt = client.get(first.headers["location"])
     assert receipt.status_code == 200 and "Season workbook" in receipt.text
+    with factory() as db:
+        stored = __import__("json").loads(db.scalar(select(OperationReceipt.result_json)))
+        maria_id = str(db.scalar(select(Customer.id).where(Customer.code == "MI")))
+    # The receipt's "after" balances include the product that was just saved (1200 + 30% markup).
+    assert D(stored["before"][maria_id]["ordered"]) == 0 and D(stored["after"][maria_id]["ordered"]) == D("1560.00")
     for _attempt in range(2):  # Export retries never mutate business records.
         workbook = client.get(f"/exports/seasons/{season_id}.xlsx")
         assert workbook.status_code == 200

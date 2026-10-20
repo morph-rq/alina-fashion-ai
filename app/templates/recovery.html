@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Recovery · {{ app_name }}{% endblock %}
+{% block title %}Backups and restore{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/intake.css?v=20261018">
-<section class="page-head"><div><p class="eyebrow">Backups you can actually restore</p><h1>Recovery</h1>
-<p>Consistent snapshots of the database, source evidence, drafts, audit history and files, checked file by file. Off-site copies are encrypted with your recovery code before they leave this computer.</p></div>
-<form action="/recovery/backup" method="post"><button class="button primary">Back up now</button></form></section>
-{% if message %}<p class="notice">{{ message }}</p>{% endif %}{% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/settings">Settings</a><span aria-hidden="true">/</span><span>Backups and restore</span></nav>
+<header class="page-header"><div><h1>Backups and restore</h1>
+<p class="page-sub">Consistent snapshots of the database, source evidence, drafts, audit history and files, checked file by file. Off-site copies are encrypted with your recovery code before they leave this computer.</p></div>
+<form action="/recovery/backup" method="post" data-once><button class="btn primary">Back up now</button></form></header>
+{% if message %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ message }}</strong></div></div>{% endif %}{% if error %}<div class="notice error" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
 {% if new_code %}<section class="panel danger-zone"><h2>Your recovery code — shown once</h2>
 <p style="font-family:monospace;font-size:1.2rem;letter-spacing:.05em;overflow-wrap:anywhere">{{ new_code }}</p>
 <p>Write it on paper or store it in a password manager that is <strong>not</strong> this computer and <strong>not</strong> the Google account holding the backups. Without it, the encrypted archives cannot be opened on another computer. It is not shown again.</p>

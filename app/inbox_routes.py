@@ -27,11 +27,23 @@ def install_inbox(app, templates, context):
             children.setdefault(child.parent_id, []).append(child)
         counts = dict(db.execute(select(SourceItem.state, func.count()).group_by(SourceItem.state)).all())
         failed_jobs = db.scalars(select(Job).where(Job.state.in_(["dead"])).order_by(Job.updated_at.desc()).limit(20)).all()
-        from app.models import Season
+        from app import ai_intake
+        from app.models import AllocationReview, ImportChange, ImportReview, IntakeSession, Season
+        sessions = db.scalars(select(IntakeSession).order_by(IntakeSession.updated_at.desc()).limit(100)).all()
+        import_reviews = db.scalars(select(ImportReview).where(ImportReview.status == "Open").order_by(ImportReview.id).limit(8)).all()
+        allocation_reviews = db.scalars(select(AllocationReview).where(AllocationReview.status == "Open").order_by(AllocationReview.id).limit(8)).all()
+        review_counts = {
+            "import": db.scalar(select(func.count()).select_from(ImportReview).where(ImportReview.status == "Open")) or 0,
+            "allocation": db.scalar(select(func.count()).select_from(AllocationReview).where(AllocationReview.status == "Open")) or 0,
+            "changes": db.scalar(select(func.count()).select_from(ImportChange).where(ImportChange.status == "Review")) or 0,
+        }
         return templates.TemplateResponse(request, "inbox.html", context(
             request, items=items, seasons=db.scalars(select(Season).order_by(Season.id.desc())).all(), children=children, counts=counts, states=source_store.INBOX_STATES, state=state,
             channel=channel, queue=jobs.queue_summary(db), failed_jobs=failed_jobs,
-            metadata={item.id: json.loads(item.metadata_json or "{}") for item in items}))
+            metadata={item.id: json.loads(item.metadata_json or "{}") for item in items},
+            sessions=sessions, ai_configured=ai_intake.ai_configured(), import_reviews=import_reviews,
+            allocation_reviews=allocation_reviews, review_counts=review_counts,
+            channels=[row[0] for row in db.execute(select(SourceItem.channel).where(SourceItem.parent_id.is_(None)).distinct()).all()]))
 
     @app.post("/inbox/{item_id}/ignore")
     def ignore(item_id: int, reason: str = Form(...), db: Session = Depends(get_db)):

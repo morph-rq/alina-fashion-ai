@@ -161,11 +161,14 @@ def test_every_page_uses_permanent_light_theme_and_ai_help(workspace_client: Tes
     assert "AI Help" in page.text
     assert "fashion-theme" not in page.text
     assert "theme-toggle" not in page.text
-    assert '/static/refinement.css?v=20260827-2' in page.text
+    # One design-system stylesheet replaced the four layered ones.
+    assert '/static/ui.css?v=' in page.text
+    assert 'refinement.css' not in page.text
 
-    mobile_css = workspace_client.get("/static/refinement.css")
+    mobile_css = workspace_client.get("/static/ui.css")
     assert mobile_css.status_code == 200
-    assert "calc(112px + env(safe-area-inset-bottom))" in mobile_css.text
+    # The phone tab bar and its Add menu stay clear of the home indicator.
+    assert "env(safe-area-inset-bottom)" in mobile_css.text
     assert "scroll-padding-bottom" in mobile_css.text
 
 

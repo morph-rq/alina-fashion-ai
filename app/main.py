@@ -71,6 +71,7 @@ from app.validation import validate_system
 from app.worksheet_routes import render_worksheet, install_worksheet, amount_value
 from app.storage import install_storage
 from app.intake_archive import archive_sources, bundle_path, install_intake_sources
+from app.navigation import AREAS, WORKSPACE_VIEWS, nav_area, safe_next, workspace_view
 
 
 STATUSES = [
@@ -158,6 +159,13 @@ templates = Jinja2Templates(directory=ROOT_DIR / "app" / "templates")
 templates.env.globals["item_amounts"] = item_amounts
 templates.env.globals["signed_payment"] = signed_payment_amount
 templates.env.globals["payment_labels"] = PAYMENT_TYPE_LABELS
+templates.env.globals["nav_area"] = nav_area
+templates.env.globals["workspace_view"] = workspace_view
+templates.env.globals["nav_areas"] = AREAS
+templates.env.globals["workspace_views"] = WORKSPACE_VIEWS
+# Cache-busting version for /static files: changes whenever a stylesheet or script changes.
+templates.env.globals["asset_version"] = lambda: str(int(max(
+    (path.stat().st_mtime for path in (ROOT_DIR / "app" / "static").glob("*.*")), default=0)))
 
 
 def money_filter(value) -> str:
@@ -178,6 +186,14 @@ def percent_filter(value) -> str:
     return f"{Decimal(value) * 100:.0f}%"
 
 
+def plain_number(value) -> str:
+    """Show a stored percentage such as 30.00000 as 30 in form fields (no rounding of real decimals)."""
+    if value is None:
+        return ""
+    number = Decimal(str(value)).normalize()
+    return format(number, "f")
+
+
 def media_url(path: str | None) -> str | None:
     if not path:
         return None
@@ -188,6 +204,9 @@ templates.env.filters["money"] = money_filter
 templates.env.filters["whole"] = whole_filter
 templates.env.filters["percent"] = percent_filter
 templates.env.filters["media"] = media_url
+templates.env.filters["plain"] = plain_number
+# Same as |money but the thousands separator never wraps (summary figures on phones).
+templates.env.filters["moneynb"] = lambda value: money_filter(value).replace(" ", " ")
 
 
 def context(request: Request, **kwargs):
@@ -283,19 +302,30 @@ def validation_api(db: Session = Depends(get_db)):
     )
 
 
+def _with_query(request: Request, path: str, **extra: str) -> str:
+    """Build a redirect target that keeps every query parameter of the old URL."""
+    from urllib.parse import urlencode
+    params = [(key, value) for key, value in request.query_params.multi_items() if key not in extra]
+    params.extend((key, value) for key, value in extra.items() if value)
+    return path + (f"?{urlencode(params)}" if params else "")
+
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db)):
-    return render_worksheet(request, db, templates, context)
+def dashboard(request: Request, season: str = "", db: Session = Depends(get_db)):
+    from app.ui_routes import overview_context
+    return templates.TemplateResponse(request, "overview.html", context(request, **overview_context(db, season)))
 
 
-@app.get("/operations", response_class=HTMLResponse)
-def operations_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse(request, "operations.html", context(request, tasks=operations_inbox(db)))
+@app.get("/operations")
+def operations_page(request: Request):
+    # To-do moved into Overview ("Next actions").
+    return RedirectResponse(_with_query(request, "/") + "#next-actions", status_code=303)
 
 
-@app.get("/orders", response_class=HTMLResponse)
-def orders_page(request: Request, db: Session = Depends(get_db)):
-    return render_worksheet(request, db, templates, context)
+@app.get("/orders")
+def orders_page(request: Request):
+    # The order list and the worksheet were the same page; the worksheet is Workspace > Products.
+    return RedirectResponse(_with_query(request, "/worksheet"), status_code=303)
 
 
 @app.get("/manual-entry", response_class=HTMLResponse)
@@ -995,7 +1025,8 @@ def season_detail(season_name: str, request: Request, db: Session = Depends(get_
     return templates.TemplateResponse(
         request,
         "season_detail.html",
-        context(request, data=data, created=request.query_params.get("created")),
+        context(request, data=data, created=request.query_params.get("created"),
+                seasons=db.scalars(select(Season).order_by(Season.id.desc())).all()),
     )
 
 
@@ -1240,6 +1271,8 @@ def upload_item_image(
         raise
     if return_to == "library":
         return RedirectResponse("/library?updated=image#products", status_code=303)
+    if return_to == "item":
+        return RedirectResponse(f"/worksheet/items/{item.id}?photo=saved", status_code=303)
     return RedirectResponse(f"/orders/{item.order.id}?image={item.id}", status_code=303)
 
 
@@ -1323,7 +1356,20 @@ def customer_detail(customer_id: int, request: Request, season: str = "", db: Se
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     seasons = db.scalars(select(Season).order_by(Season.id.desc())).all()
-    return templates.TemplateResponse(request, "customer_detail.html", context(request, statement=statement, seasons=seasons, season=current))
+    season_id = statement.season.id
+    customer = statement.customer
+    history = db.scalars(select(AuditLog).where(or_(
+        (AuditLog.entity_type == "Customer") & (AuditLog.entity_id == str(customer.id)),
+        (AuditLog.entity_type == "CustomerAlias") & (AuditLog.new_value == customer.code),
+        (AuditLog.entity_type == "Payment") & AuditLog.description.like(f"% for customer {customer.id}"),
+    )).order_by(AuditLog.timestamp.desc()).limit(8)).all()
+    return templates.TemplateResponse(request, "customer_detail.html", context(
+        request, statement=statement, seasons=seasons, season=current, history=history,
+        # Customer payments are recorded in the newest season (see POST /payments).
+        is_newest=bool(seasons) and seasons[0].id == season_id,
+        orders=db.scalars(select(Order).where(Order.season_id == season_id).options(selectinload(Order.brand)).order_by(Order.id)).all(),
+        ready_batches=db.scalars(select(ReadyBatch).where(ReadyBatch.season_id == season_id).order_by(ReadyBatch.id.desc())).all(),
+    ))
 
 
 @app.post("/customers/{customer_id}/settings")
@@ -1331,7 +1377,7 @@ def update_customer_settings(
     customer_id: int, name: str = Form(""), phone: str = Form(""), email: str = Form(""),
     country_code: str = Form(""), address: str = Form(""), city: str = Form(""), postal_code: str = Form(""),
     preferred_contact: str = Form(""), notes: str = Form(""), alias: str = Form(""),
-    return_to: str = Form("customers"), db: Session = Depends(get_db),
+    return_to: str = Form("customers"), next: str = Form(""), db: Session = Depends(get_db),
 ):
     customer = db.get(Customer, customer_id)
     if customer is None:
@@ -1366,31 +1412,13 @@ def update_customer_settings(
             record_change(db, entity_type="CustomerAlias", entity_id=clean_alias, field=None, previous_value=None, new_value=customer.code, source_user="web user", description=f"Added alias {clean_alias} for {customer.code}")
     db.commit()
     destination = f"/customers/{customer.id}?saved=1" if return_to == "detail" else "/customers"
-    return RedirectResponse(destination, status_code=303)
+    return RedirectResponse(safe_next(next, destination), status_code=303)
 
 
-@app.get("/ready-batches", response_class=HTMLResponse)
-def ready_batches_page(request: Request, season: str = "", db: Session = Depends(get_db)):
-    season = selected_season(db, season)
-    seasons = db.scalars(select(Season).order_by(Season.id.desc())).all()
-    batches = db.scalars(
-        select(ReadyBatch).where(ReadyBatch.season_id == season.id).options(
-            selectinload(ReadyBatch.items).selectinload(OrderItem.order).selectinload(Order.season).selectinload(Season.rules),
-            selectinload(ReadyBatch.payment_allocations).selectinload(PaymentAllocation.payment),
-        ).order_by(ReadyBatch.id)
-    ).all() if season else []
-    rows = []
-    for batch in batches:
-        value = money(sum((item_amounts(item).final for item in batch.items if item.status != "Cancelled"), ZERO))
-        due = money(sum((customer_ready_due(item) for item in batch.items), ZERO))
-        customer_paid = money(sum((signed_payment_amount(allocation.amount, allocation.payment.type) for allocation in batch.payment_allocations if allocation.stage == "ready"), ZERO))
-        factory_paid = money(sum(db.scalars(select(FactoryPayment.amount).where(FactoryPayment.ready_batch_id == batch.id, FactoryPayment.stage == "ready")).all(), ZERO))
-        rows.append({"batch": batch, "value": value, "due": due, "customer_paid": customer_paid,
-                     "factory_due": factory_ready_due(batch.items), "factory_paid": factory_paid})
-    orders = db.scalars(
-        select(Order).where(Order.season_id == season.id).options(selectinload(Order.brand)).order_by(Order.id)
-    ).all() if season else []
-    return templates.TemplateResponse(request, "ready_batches.html", context(request, rows=rows, season=season, seasons=seasons, generated=request.query_params.get("generated"), ready_result=request.query_params.get("result")))
+@app.get("/ready-batches")
+def ready_batches_page(request: Request):
+    # Ready batches, shipments and groups share Workspace > Ready & shipping.
+    return RedirectResponse(_with_query(request, "/logistics", focus="ready"), status_code=303)
 
 
 @app.post("/ready-batches/process")
@@ -1428,7 +1456,7 @@ def process_ready_batch_upload(
 
 
 @app.post("/ready-batches")
-def create_ready_batch(name: str = Form(...), season_name: str = Form(...), ready_date: str = Form(""), notes: str = Form(""), db: Session = Depends(get_db)):
+def create_ready_batch(name: str = Form(...), season_name: str = Form(...), ready_date: str = Form(""), notes: str = Form(""), next: str = Form(""), db: Session = Depends(get_db)):
     season = selected_season(db, season_name)
     if season is None:
         raise HTTPException(422, "Import or create a season first")
@@ -1439,11 +1467,11 @@ def create_ready_batch(name: str = Form(...), season_name: str = Form(...), read
     db.flush()
     record_change(db, entity_type="ReadyBatch", entity_id=batch.id, field=None, previous_value=None, new_value=batch.name, source_user="web user", description=f"Created Ready batch {batch.name}")
     db.commit()
-    return RedirectResponse(f"/ready-batches?season={season.name}", status_code=303)
+    return RedirectResponse(safe_next(next, f"/ready-batches?season={season.name}"), status_code=303)
 
 
 @app.post("/factory-payments")
-def create_factory_payment(season_name: str = Form(...), order_id: str = Form(""), ready_batch_id: str = Form(""), payment_date: date = Form(...), amount: str = Form(...), stage: str = Form(...), note: str = Form(""), db: Session = Depends(get_db)):
+def create_factory_payment(season_name: str = Form(...), order_id: str = Form(""), ready_batch_id: str = Form(""), payment_date: date = Form(...), amount: str = Form(...), stage: str = Form(...), note: str = Form(""), next: str = Form(""), db: Session = Depends(get_db)):
     season = selected_season(db, season_name)
     if season is None or stage not in {"initial", "ready"}:
         raise HTTPException(422, "Invalid factory payment")
@@ -1468,7 +1496,7 @@ def create_factory_payment(season_name: str = Form(...), order_id: str = Form(""
     db.flush()
     record_change(db, entity_type="FactoryPayment", entity_id=payment.id, field=None, previous_value=None, new_value=payment.amount, source_user="web user", description=f"Recorded factory {stage} payment {payment.amount} for {selected_order.brand.name if selected_order else 'season-level allocation'}")
     db.commit()
-    return RedirectResponse(f"/ready-batches?season={season.name}", status_code=303)
+    return RedirectResponse(safe_next(next, f"/ready-batches?season={season.name}"), status_code=303)
 
 
 @app.get("/rules", response_class=HTMLResponse)
@@ -1502,25 +1530,9 @@ def update_rule(rule_id: int, markup: str = Form(...), initial: str = Form(...),
     return RedirectResponse("/rules", status_code=303)
 
 
-@app.get("/shipments", response_class=HTMLResponse)
-def shipments_page(request: Request, db: Session = Depends(get_db)):
-    season = active_season(db)
-    shipments = db.scalars(
-        select(Shipment)
-        .where(Shipment.season_id == season.id if season else Shipment.id == -1)
-        .options(selectinload(Shipment.items).selectinload(ShipmentItem.order_item))
-        .order_by(Shipment.date, Shipment.name)
-    ).all()
-    summaries = [shipment_summary(shipment) for shipment in shipments]
-    expenses = db.scalars(
-        select(Expense).where(Expense.season_id == season.id if season else Expense.id == -1).options(
-            selectinload(Expense.shipment), selectinload(Expense.order).selectinload(Order.brand),
-            selectinload(Expense.customer),
-        ).order_by(Expense.id.desc())
-    ).all()
-    customers = db.scalars(select(Customer).order_by(Customer.code)).all()
-    orders = db.scalars(select(Order).where(Order.season_id == season.id if season else Order.id == -1).options(selectinload(Order.brand), selectinload(Order.season)).order_by(Order.id)).all()
-    return templates.TemplateResponse(request, "shipments.html", context(request, summaries=summaries, expenses=expenses, customers=customers, orders=orders))
+@app.get("/shipments")
+def shipments_page(request: Request):
+    return RedirectResponse(_with_query(request, "/logistics", focus="shipments"), status_code=303)
 
 
 @app.post("/shipments")
@@ -1536,6 +1548,7 @@ def create_shipment(
     suitcase_cost: str = Form("0"),
     bag_cost: str = Form("0"),
     notes: str = Form(""),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     season = active_season(db)
@@ -1561,7 +1574,7 @@ def create_shipment(
     db.flush()
     record_change(db, entity_type="Shipment", entity_id=shipment.id, field=None, previous_value=None, new_value=shipment.name, source_user="web user", description=f"Created shipment {shipment.name}")
     db.commit()
-    return RedirectResponse("/shipments", status_code=303)
+    return RedirectResponse(safe_next(next, "/shipments"), status_code=303)
 
 
 @app.post("/expenses")
@@ -1572,6 +1585,7 @@ def create_expense(
     order_id: str = Form(""),
     customer_id: str = Form(""),
     note: str = Form(""),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     season = active_season(db)
@@ -1610,17 +1624,13 @@ def create_expense(
         description=f"Recorded {expense.type} expense {expense.amount}",
     )
     db.commit()
-    return RedirectResponse("/shipments", status_code=303)
+    return RedirectResponse(safe_next(next, "/shipments"), status_code=303)
 
 
-@app.get("/payments", response_class=HTMLResponse)
-def payments_page(request: Request, db: Session = Depends(get_db)):
-    season = active_season(db)
-    payments = db.scalars(select(Payment).where(Payment.season_id == season.id if season else Payment.id == -1).options(selectinload(Payment.customer), selectinload(Payment.order), selectinload(Payment.allocations)).order_by(Payment.date.desc(), Payment.id.desc())).all()
-    customers = db.scalars(select(Customer).order_by(Customer.code)).all()
-    ready_batches = db.scalars(select(ReadyBatch).where(ReadyBatch.season_id == season.id if season else ReadyBatch.id == -1).order_by(ReadyBatch.id.desc())).all()
-    orders = db.scalars(select(Order).where(Order.season_id == season.id if season else Order.id == -1).options(selectinload(Order.brand), selectinload(Order.season)).order_by(Order.id)).all()
-    return templates.TemplateResponse(request, "payments.html", context(request, payments=payments, customers=customers, ready_batches=ready_batches, orders=orders))
+@app.get("/payments")
+def payments_page(request: Request):
+    # Customer payments, factory payments and seller credit share Workspace > Money.
+    return RedirectResponse(_with_query(request, "/money", focus="payments"), status_code=303)
 
 
 @app.post("/payments")
@@ -1633,6 +1643,7 @@ def create_payment(
     order_id: str = Form(""),
     ready_batch_id: str = Form(""),
     note: str = Form(""),
+    next: str = Form(""),
     db: Session = Depends(get_db),
 ):
     season = active_season(db)
@@ -1665,7 +1676,7 @@ def create_payment(
         db.add(PaymentAllocation(payment_id=payment.id, ready_batch_id=batch_id, order_id=selected_order_id, stage=stage, amount=payment.amount))
     record_change(db, entity_type="Payment", entity_id=payment.id, field=None, previous_value=None, new_value=payment.amount, source_user="web user", description=f"Recorded {type} {payment.amount} for customer {customer_id}")
     db.commit()
-    return RedirectResponse("/payments", status_code=303)
+    return RedirectResponse(safe_next(next, "/payments"), status_code=303)
 
 
 @app.get("/validation", response_class=HTMLResponse)
@@ -2018,11 +2029,13 @@ async def assistant_help(request: Request, db: Session = Depends(get_db)):
             "special_cost": float(rule.special_cost),
         } for rule in rules],
         "pages": {
-            "Home": "/", "Add order": "/manual-entry", "AI intake": "/ai-intake", "Orders": "/orders",
-            "Customers": "/customers", "Payments": "/payments", "PDFs": "/reports", "Library": "/library",
-            "Rules": "/rules", "To-do": "/operations",
-            "Excel files": "/excel", "Issues & suggestions": "/validation", "Source reviews": "/source-reviews",
-            "Shipment groups": "/groups", "Seller credit": "/credits", "Storage & backups": "/storage",
+            "Overview (next actions, season figures)": "/", "Workspace products": "/worksheet",
+            "Workspace brands": "/brands", "Workspace ready and shipping (Ready lists, shipments, groups)": "/logistics",
+            "Workspace money (payments, factory payments, seller credit)": "/money",
+            "Inbox (new intake, captured sources, reviews)": "/inbox", "Add a product": "/manual-entry",
+            "Quick AI draft table": "/ai-intake", "Customers": "/customers", "Customer statements": "/reports",
+            "Excel files": "/excel", "System check": "/validation", "Settings": "/settings",
+            "Rules": "/rules", "Library": "/library", "Backups and restore": "/recovery",
         },
         "exports": {"Editable order workbook (download, edit, upload)": "/excel/download", "Blank new-products template": "/excel/download?blank=true", "Full accounting reference report (not editable upload format)": "/exports/business.xlsx"},
     }
@@ -2260,9 +2273,18 @@ def library_link_suggestions(target_type: str, target_id: int, db: Session = Dep
 
 
 @app.get("/audit", response_class=HTMLResponse)
-def audit_page(request: Request, db: Session = Depends(get_db)):
-    logs = db.scalars(select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(500)).all()
-    return templates.TemplateResponse(request, "audit.html", context(request, logs=logs))
+def audit_page(request: Request, entity: str = "", id: str = "", q: str = "", db: Session = Depends(get_db)):
+    query = select(AuditLog)
+    if entity.strip():
+        query = query.where(AuditLog.entity_type == entity.strip())
+    if id.strip():
+        query = query.where(AuditLog.entity_id == id.strip())
+    if q.strip():
+        query = query.where(func.lower(func.coalesce(AuditLog.description, "")).like(f"%{q.strip().lower()}%"))
+    logs = db.scalars(query.order_by(AuditLog.timestamp.desc()).limit(500)).all()
+    entity_types = db.scalars(select(AuditLog.entity_type).distinct().order_by(AuditLog.entity_type)).all()
+    return templates.TemplateResponse(request, "audit.html", context(
+        request, logs=logs, entity=entity.strip(), entity_id=id.strip(), q=q.strip(), entity_types=entity_types))
 
 
 from app.excel_exchange import install_excel_exchange
@@ -2280,5 +2302,7 @@ from app.connections_routes import install_connections
 install_connections(app, templates, context)
 from app.recovery_routes import install_recovery
 install_recovery(app, templates, context)
+from app.ui_routes import install_ui
+install_ui(app, templates, context)
 # Register background job handlers and schedulers.
 from app import outbox as _outbox, sync as _sync  # noqa: E402,F401

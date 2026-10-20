@@ -49,7 +49,7 @@ factory Ready due   = Σ (row wholesale base − row factory initial share) for 
 ```
 
 Shares are computed in `app/services.py` (`item_initial_shares`, `client_initial_charges`, `customer_ready_due`,
-`factory_initial_due`, `factory_ready_due`). Statements, the dashboard, System Check, To-do, the Ready page and
+`factory_initial_due`, `factory_ready_due`). Statements, the Overview, System Check, its next actions, Ready & shipping and
 Excel use these functions, so customer shares always reconcile to the order total and a fully Ready row is
 charged exactly its value (previously the two halves were rounded separately and could exceed the value by a
 cent). A purchase group's initial/shipment percentages override the brand rule for its rows. Factory

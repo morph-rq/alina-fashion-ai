@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Saved · {{ session.title }}{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/intake.css?v=20261018">
-<section class="page-head"><div><p class="eyebrow">Saved once · receipt {{ key[:8] }}</p><h1>{{ session.title }}</h1>
-<p>Saved {{ receipt.saved_at[:19].replace('T', ' ') }} UTC. Downloading files below never saves or changes records again, so a failed download can simply be retried.</p></div>
-<a class="button" href="/intake/{{ session.public_id }}">Back to the intake</a></section>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/inbox">Inbox</a><span aria-hidden="true">/</span><a href="/intake/{{ session.public_id }}">{{ session.title }}</a><span aria-hidden="true">/</span><span>Receipt {{ key[:8] }}</span></nav>
+<header class="page-header"><div><h1>Saved: {{ session.title }}</h1>
+<p class="page-sub">Saved once at {{ receipt.saved_at[:19].replace('T', ' ') }} UTC. Downloading the files below never saves or changes records again, so a failed download can simply be retried.</p></div>
+<div class="page-actions"><a class="btn" href="/intake/{{ session.public_id }}">Back to the intake</a><a class="btn quiet" href="/worksheet">Open Workspace</a></div></header>
 <section class="two-col top-align">
 <article class="panel"><h2>What was saved</h2>
 <table class="data-table"><thead><tr><th>Row</th><th>Action</th><th>Record</th><th>Details</th></tr></thead><tbody>
@@ -14,7 +14,7 @@
 </tbody></table>
 <h2>Customer balances</h2>
 <table class="data-table"><thead><tr><th>Customer</th><th>Ordered before → after</th><th>Charged before → after</th><th>Outstanding before → after</th></tr></thead><tbody>
-{% for customer_id, after in receipt.after.items() %}{% set before = receipt.before.get(customer_id, {}) %}<tr><td>#{{ customer_id }}</td>
+{% for customer_id, after in receipt.after.items() %}{% set before = receipt.before.get(customer_id, {}) %}<tr><td><a href="/customers/{{ customer_id }}?season={{ session.season.name|urlencode }}">#{{ customer_id }}</a></td>
 <td>{{ before.ordered or '0.00' }} → {{ after.ordered }}</td><td>{{ before.charged or '0.00' }} → {{ after.charged }}</td><td>{{ before.outstanding or '0.00' }} → {{ after.outstanding }}</td></tr>{% endfor %}
 </tbody></table></article>
 <article class="panel"><h2>Downloads</h2>

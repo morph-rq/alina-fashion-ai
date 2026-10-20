@@ -1,1 +1,14 @@
-{% extends "base.html" %}{% block content %}<div class="wb-heading"><div><p class="eyebrow">ORIGINAL AI SOURCE</p><h1>Saved evidence</h1><p>Source attachments are kept in the app’s data folder and included in its backups.</p></div><a class="button" href="/worksheet">Order workbook →</a></div><section class="wb-card"><h2>Original message</h2><pre class="source-evidence">{{ archive.message or 'No typed message' }}</pre><h2>Attachments</h2>{% for file in archive.files %}<p><a class="button" href="/intake-sources/{{ token }}/{{ loop.index0 }}">↓ {{ file.original_name }}</a><small>{{ file.size }} bytes · SHA-256 {{ file.sha256[:12] }}…</small></p>{% else %}<p>No attached files.</p>{% endfor %}<a href="/storage">Check local and Google Drive backup status →</a></section>{% endblock %}
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Saved evidence{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/inbox">Inbox</a><span aria-hidden="true">/</span><span>Saved AI source</span></nav>
+<header class="page-header"><div><h1>Saved evidence</h1><p class="page-sub">The original message and attachments used by the AI draft table. They are kept in the app's data folder and included in its backups.</p></div><div class="page-actions"><a class="btn" href="/worksheet">Open Workspace</a></div></header>
+<section class="panel" style="max-width:900px">
+  <h2>Original message</h2>
+  <pre class="source-evidence">{{ archive.message or 'No typed message' }}</pre>
+  <h2 style="margin-top:18px">Attachments</h2>
+  <ul class="history-list">{% for file in archive.files %}<li style="display:flex;justify-content:space-between;gap:12px;align-items:center"><span><strong>{{ file.original_name }}</strong><time>{{ file.size }} bytes · SHA-256 {{ file.sha256[:12] }}…</time></span><a class="btn sm" href="/intake-sources/{{ token }}/{{ loop.index0 }}">{{ ui.icon('download') }}Download</a></li>{% else %}<li class="muted">No attached files.</li>{% endfor %}</ul>
+  <p style="margin:14px 0 0"><a href="/recovery">Check backup status</a></p>
+</section>
+{% endblock %}

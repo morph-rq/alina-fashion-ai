@@ -1,12 +1,15 @@
 # Operator guide (testing copy)
 
-Open the app at <http://127.0.0.1:8001>. The everyday path is **Intake**.
+Open the app at <http://127.0.0.1:8001>. The top bar has four areas — **Overview**, **Workspace**, **Inbox**,
+**Customers** — and Search (Ctrl K), AI Help, **Add** and the Settings gear. On a phone the four areas and Add
+are in the bottom bar. [navigation-guide.md](navigation-guide.md) lists where every former tab went.
+The everyday path is the **Inbox**.
 
-## 1. Record goods, corrections or payments with Intake
+## 1. Record goods, corrections or payments in the Inbox
 
-1. **Intake → New intake.** Choose the season, type what happened, attach photos, screenshots, PDFs,
-   spreadsheets, text or voice notes, and press **Start**. Files are stored (and checksummed) before
-   anything analyses them.
+1. **Inbox → New intake** (or **Add → From photos, files or a message**). Choose the season, type what
+   happened, attach photos, screenshots, PDFs, spreadsheets, text or voice notes, and press **Start intake**.
+   Files are stored (and checksummed) before anything analyses them.
 2. The page has three parts (tabs on a phone):
    * **Conversation** — your messages, the assistant's notes and up to three focused questions. Answer with a
      button or by typing. Answers update the existing draft row; they never create a second order.
@@ -39,23 +42,25 @@ from photos or body measurements.
 Without AI configured, everything still works by hand: **Add product row**, fill the fields from the evidence,
 save.
 
-## 2. Source inbox
+## 2. Captured sources
 
-**Intake → Source inbox** lists every upload, Drive file and e-mail with its state: captured, queued,
+**Inbox → Sources** lists every upload, Drive file and e-mail with its state: captured, queued,
 analysing, needs answers, ready for review, applied, failed (with the reason and a retry) or ignored (with
 your reason). **Review in intake** opens an intake for a synced item. Synced evidence never posts goods or
 money by itself.
 
 ## 3. Unallocated products and import notes
 
-**Issues & suggestions** lists System Check findings with links. For a customer-allocation note, open it,
+**System Check** (the card on **Overview**, also under Settings → History and checks) lists the findings with
+links; source and allocation notes are also listed under **Inbox → Reviews**. For a customer-allocation note, open it,
 read the original description, then allocate the units to customers and record the evidence (for example
 "supplier e-mail of 3 Oct lists AA two, KI one"). Rows are split where needed, keeping their provenance; the
 page shows System Check errors before and after. Do not assign a customer just to make totals pass.
 
 ## 4. Correcting saved products
 
-Product rows can be edited in the brand table. For Ready or shipped rows, changing quantity, price, markup or
+Product rows can be edited on the product page (**Workspace → Products**, click a row; saving returns to the
+same filtered list) or in the brand table (**Workspace → Brands**). For Ready or shipped rows, changing quantity, price, markup or
 customer requires a correction reason, which is stored in the audit history. If someone else changed the row
 after you opened it, the save is refused; reload and apply your change again.
 
@@ -65,18 +70,27 @@ after you opened it, the save is refused; reload and apply your change again.
   rounding; *App final total* is the authoritative amount), a Master summary, one linked tab per brand, and a
   **Checks** sheet showing formula result vs. app amount ("OK" once Excel has calculated) plus the export time,
   scope and revision. Text such as SKUs is stored as text, so leading zeros survive.
-* **Editable order workbook** (`Excel files`): download, edit, upload, review the proposed changes, apply.
+* **Editable order workbook** (**Workspace → Excel & statements → Edit in Excel**): download, edit, upload,
+  review the proposed changes, apply.
   Stale rows are refused; Ready/shipped financial fields cannot be changed through Excel.
-* **Customer workbook** (customer page → *Customer Excel*) is safe to share with that customer: no wholesale
-  prices, markup, notes, sources or other customers. *Internal Excel* contains costs; do not share it.
+* **Customer workbook** (customer page → **Excel → Customer Excel**) is safe to share with that customer: no
+  wholesale prices, markup, notes, sources or other customers. **Internal Excel** contains costs; do not share it.
 
 ## 6. Clean-up and reset
 
-**More tools → Clean-up & reset** separates: removing a stored source file (records stay), reversing a Ready
+**Settings → Recovery → Clean-up and reset** separates: removing a stored source file (records stay), reversing a Ready
 import (only while nothing depends on it), restoring a snapshot, and resetting the whole workspace. A reset
 deletes **every** record including manual entries and the audit history, after writing a verified recovery
 snapshot first. Type `RESET WORKSPACE` to confirm.
 
 ## 7. Connections and recovery
 
-See `drive-gmail-setup.md` and `backup-restore.md`.
+**Settings → Connections** (Google Drive and Gmail) and **Settings → Recovery** (backups and restore). See
+`drive-gmail-setup.md` and `backup-restore.md`.
+
+## 8. Ready lists, shipments and money
+
+**Workspace → Ready & shipping** holds Ready lists (process a supplier list or create a batch), factory payments
+per Ready batch, shipments and exceptional expenses, shipment groups and distributors. **Workspace → Money**
+holds customer payments and refunds, factory payments and seller credit. Payments, shipments and expenses are
+recorded in the newest season; pages showing an older season say so.

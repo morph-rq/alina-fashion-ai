@@ -1,5 +1,18 @@
 {% extends "base.html" %}
+{% block title %}Audit history{% endblock %}
 {% block content %}
-<section class="page-head"><div><p class="eyebrow">Financial history</p><h1>Audit log</h1></div></section>
-<section class="panel"><table class="data-table"><thead><tr><th>Timestamp</th><th>Source</th><th>Entity</th><th>Field</th><th>Previous</th><th>New</th><th>Description</th></tr></thead><tbody>{% for log in logs %}<tr><td>{{ log.timestamp }}</td><td>{{ log.source_user }}</td><td>{{ log.entity_type }} {{ log.entity_id }}</td><td>{{ log.field or '-' }}</td><td class="text">{{ log.previous_value or '-' }}</td><td class="text">{{ log.new_value or '-' }}</td><td class="text">{{ log.description }}</td></tr>{% endfor %}</tbody></table></section>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/settings">Settings</a><span aria-hidden="true">/</span><span>Audit history</span></nav>
+<header class="page-header"><div><h1>Audit history</h1><p class="page-sub">Every recorded change, newest first (up to 500 shown). Records cannot be edited or deleted here.</p></div></header>
+<form class="filter-bar" method="get" action="/audit" role="search" aria-label="Filter history">
+  <label class="search">Description contains<input type="search" name="q" value="{{ q }}" placeholder="A customer code, product, rule…"></label>
+  <label>Record type<select name="entity" onchange="this.form.requestSubmit()"><option value="">All types</option>{% for name in entity_types %}<option {{ 'selected' if entity == name }}>{{ name }}</option>{% endfor %}</select></label>
+  <label>Record ID<input name="id" value="{{ entity_id }}" inputmode="numeric" placeholder="Any"></label>
+  <div class="filter-actions"><button class="btn" type="submit">Apply</button>{% if q or entity or entity_id %}<a class="btn quiet" href="/audit">Reset</a>{% endif %}</div>
+</form>
+{% if entity == 'OrderItem' and entity_id %}<p style="margin:-2px 0 12px"><a href="/worksheet/items/{{ entity_id }}">Open product #{{ entity_id }}</a></p>{% elif entity == 'Customer' and entity_id %}<p style="margin:-2px 0 12px"><a href="/customers/{{ entity_id }}">Open customer #{{ entity_id }}</a></p>{% endif %}
+<div class="table-frame"><table class="table">
+  <thead><tr><th>When</th><th>By</th><th>Record</th><th>Field</th><th>Previous</th><th>New</th><th>Description</th></tr></thead>
+  <tbody>{% for log in logs %}<tr><td class="nowrap">{{ log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else '' }}</td><td>{{ log.source_user }}</td><td class="nowrap">{% if log.entity_type == 'OrderItem' %}<a href="/worksheet/items/{{ log.entity_id }}">Product {{ log.entity_id }}</a>{% elif log.entity_type == 'Customer' %}<a href="/customers/{{ log.entity_id }}">Customer {{ log.entity_id }}</a>{% else %}{{ log.entity_type }} {{ log.entity_id }}{% endif %}</td><td>{{ log.field or '—' }}</td><td class="text">{{ log.previous_value or '—' }}</td><td class="text">{{ log.new_value or '—' }}</td><td class="text">{{ log.description }}</td></tr>
+  {% else %}<tr class="table-empty"><td colspan="7">No recorded changes{% if q or entity or entity_id %} match these filters{% endif %}.</td></tr>{% endfor %}</tbody>
+</table></div>
 {% endblock %}

@@ -12,9 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from app import item_service
 from app.calculations import ZERO, money
 from app.database import get_db
-from app.models import (Customer, Distributor, OrderItem, PurchaseGroup, Season,
+from app.models import (AuditLog, Brand, Customer, Distributor, OrderItem, PurchaseGroup, Season,
                         SellerCreditAccount, SellerCreditEntry, ImportReview,
                         ReadyBatch, Shipment, ShipmentItem)
+from app.navigation import safe_next
 from app.worksheet import (STATUS_LABELS, account_balance, audit, ensure_import_groups,
                           get_account, lock_ledger, transfer_credit, worksheet_data, status_of)
 
@@ -31,6 +32,14 @@ def amount_value(value, label='Amount', positive=False):
         return money(amount)
     except (InvalidOperation, ValueError):
         raise HTTPException(422, f'{label} must be a valid {"positive" if positive else "non-negative"} amount with at most two decimals.')
+
+
+def with_notice(target, **params):
+    """Add a one-time confirmation (e.g. saved=12) to a worksheet return URL."""
+    if not target.startswith('/worksheet'):
+        return target
+    from urllib.parse import urlencode
+    return target + ('&' if '?' in target else '?') + urlencode(params)
 
 
 def find(db, model, identity):
@@ -55,6 +64,8 @@ def render_worksheet(request, db, templates, context):
             continue
         if query.get('season') and str(i.order.season_id) != query['season']:
             continue
+        if query.get('brand') and str(i.order.brand_id) != query['brand']:
+            continue
         if query.get('customer') and str(i.customer_id or 0) != query['customer']:
             continue
         if query.get('distributor') and str(i.purchase_group.distributor_id if i.purchase_group and i.purchase_group.distributor_id else 0) != query['distributor']:
@@ -77,10 +88,19 @@ def render_worksheet(request, db, templates, context):
         else:
             label = item.purchase_group.name if item.purchase_group else 'Not grouped yet'
         sections[row.state][label].append(row)
+    season_filter = query.get('season', '')
+    current_season = db.get(Season, int(season_filter)) if season_filter.isdigit() else None
+    from urllib.parse import urlencode
+    kept = [(key, value) for key, value in query.multi_items() if key not in ('saved', 'updated') and value]
+    here = request.url.path + (f'?{urlencode(kept)}' if kept else '')
+    saved_id = query.get('saved', '')
+    saved_item = next((row.item for row in data['rows'] if str(row.item.id) == saved_id), None) if saved_id.isdigit() else None
     return templates.TemplateResponse(request, 'worksheet.html', context(request, **data,
-        sections=sections, filtered_count=len(selected),
+        sections=sections, filtered_count=len(selected), current_season=current_season, here=here,
+        saved_item=saved_item, updated_count=query.get('updated', ''), filters_applied=bool(kept),
         customers=db.scalars(select(Customer).order_by(Customer.code)).all(),
         distributors=db.scalars(select(Distributor).order_by(Distributor.name)).all(),
+        brands=db.scalars(select(Brand).order_by(Brand.name)).all(),
         seasons=db.scalars(select(Season).order_by(Season.id.desc())).all(),
         reviews=db.scalars(select(ImportReview).where(ImportReview.status == 'Open')).all()))
 
@@ -88,8 +108,12 @@ def render_worksheet(request, db, templates, context):
 def install_worksheet(app, templates, context):
     @app.exception_handler(HTTPException)
     async def worksheet_error(request: Request, exc: HTTPException):
-        if request.url.path.startswith(('/worksheet','/groups','/credits','/distributors','/storage','/source-reviews')):
-            return templates.TemplateResponse(request, 'workflow_error.html', context(request,message=exc.detail),status_code=exc.status_code)
+        # Browser pages get a readable page with a way back; API and fetch() clients keep JSON errors.
+        accept = request.headers.get('accept', '')
+        wants_page = 'text/html' in accept and 'application/json' not in accept and not request.url.path.startswith('/api/')
+        if wants_page or request.url.path.startswith(('/worksheet','/groups','/credits','/distributors','/storage','/source-reviews')):
+            return templates.TemplateResponse(request, 'workflow_error.html', context(request, message=exc.detail, status_code=exc.status_code,
+                                              was_change=request.method not in ('GET', 'HEAD')), status_code=exc.status_code, headers=getattr(exc, 'headers', None))
         from fastapi.exception_handlers import http_exception_handler
         return await http_exception_handler(request,exc)
 
@@ -107,9 +131,15 @@ def install_worksheet(app, templates, context):
     @app.get('/worksheet/items/{item_id}')
     def item_page(item_id: int, request: Request, db=Depends(get_db)):
         item = find(db, OrderItem, item_id)
+        back = safe_next(request.query_params.get('next'), '/worksheet')
+        if not back.startswith('/worksheet'):
+            back = '/worksheet'
+        history = db.scalars(select(AuditLog).where(AuditLog.entity_type == 'OrderItem', AuditLog.entity_id == str(item.id))
+                             .order_by(AuditLog.timestamp.desc()).limit(8)).all()
         return templates.TemplateResponse(request, 'worksheet_item.html', context(request, item=item,
             status_labels=STATUS_LABELS, current_state=status_of(item), customers=db.scalars(select(Customer).order_by(Customer.code)).all(),
-            groups=db.scalars(select(PurchaseGroup).where(PurchaseGroup.season_id == item.order.season_id)).all()))
+            groups=db.scalars(select(PurchaseGroup).where(PurchaseGroup.season_id == item.order.season_id)).all(),
+            back=back, history=history))
 
     @app.post('/worksheet/items/{item_id}')
     def item_update(item_id: int, state: str = Form(...), customer_id: str = Form(''),
@@ -117,7 +147,7 @@ def install_worksheet(app, templates, context):
                     color: str | None = Form(None), size: str | None = Form(None), quantity: int | None = Form(None),
                     wholesale: str | None = Form(None), selling: str | None = Form(None), markup: str | None = Form(None),
                     return_review: str = Form(''), revision: str = Form(''), correction_reason: str = Form(''),
-                    db=Depends(get_db)):
+                    next: str = Form(''), db=Depends(get_db)):
         item = find(db, OrderItem, item_id)
         if state not in STATUS_LABELS:
             raise HTTPException(422, 'Choose a valid worksheet status.')
@@ -147,10 +177,11 @@ def install_worksheet(app, templates, context):
         if re.fullmatch(r'(import|allocation)-\d+',return_review):
             kind,identity = return_review.split('-')
             return RedirectResponse(f'/source-reviews/{kind}/{identity}',303)
-        return RedirectResponse('/worksheet', 303)
+        return RedirectResponse(with_notice(safe_next(next, '/worksheet'), saved=item.id), 303)
 
     @app.post('/worksheet/bulk')
-    def bulk_items(item_ids: list[int] = Form(...), group_id: str = Form(''), state: str = Form(''), db=Depends(get_db)):
+    def bulk_items(item_ids: list[int] = Form(...), group_id: str = Form(''), state: str = Form(''),
+                   next: str = Form(''), db=Depends(get_db)):
         if not group_id and not state:
             raise HTTPException(422, 'Choose a group or status before applying.')
         if state and state not in STATUS_LABELS:
@@ -174,16 +205,16 @@ def install_worksheet(app, templates, context):
                 audit(db, 'OrderItem', item.id, f'Worksheet status {item.worksheet_status} → {state}. Credit preserved.')
                 item.worksheet_status = state
         db.commit()
-        return RedirectResponse('/worksheet', 303)
+        return RedirectResponse(with_notice(safe_next(next, '/worksheet'), updated=len(items)), 303)
 
     @app.get('/groups')
-    def groups_page(request: Request, db=Depends(get_db)):
-        return templates.TemplateResponse(request, 'purchase_groups.html', context(request, **worksheet_data(db),
-            distributors=db.scalars(select(Distributor).order_by(Distributor.name)).all(),
-            seasons=db.scalars(select(Season).order_by(Season.id.desc())).all()))
+    def groups_page():
+        # Groups and distributors live in Workspace > Ready & shipping. No fragment is added, so a
+        # browser keeps "#group-N" from the original link and lands on that group.
+        return RedirectResponse('/logistics?focus=groups', 303)
 
     @app.post('/distributors')
-    def create_distributor(name: str = Form(...), contact: str = Form(''), db=Depends(get_db)):
+    def create_distributor(name: str = Form(...), contact: str = Form(''), next: str = Form(''), db=Depends(get_db)):
         name = name.strip()
         if not name or len(name) > 200:
             raise HTTPException(422, 'Enter a distributor name (up to 200 characters).')
@@ -191,11 +222,11 @@ def install_worksheet(app, templates, context):
             raise HTTPException(422, 'This distributor already exists.')
         db.add(Distributor(name=name, contact=contact.strip()[:500] or None))
         db.commit()
-        return RedirectResponse('/groups', 303)
+        return RedirectResponse(safe_next(next, '/groups'), 303)
 
     @app.post('/groups')
     def create_group(name: str = Form(...), season_id: int = Form(...), seller: str = Form(''),
-                     distributor_id: str = Form(''), db=Depends(get_db)):
+                     distributor_id: str = Form(''), next: str = Form(''), db=Depends(get_db)):
         find(db, Season, season_id)
         if not name.strip() or len(name) > 200:
             raise HTTPException(422, 'Enter a group name (up to 200 characters).')
@@ -206,7 +237,8 @@ def install_worksheet(app, templates, context):
         db.flush()
         audit(db, 'PurchaseGroup', group.id, f'Created group {group.name}.')
         db.commit()
-        return RedirectResponse(f'/groups#group-{group.id}', 303)
+        target = safe_next(next, '/groups')
+        return RedirectResponse(f'{target}#group-{group.id}', 303)
 
     @app.post('/groups/{group_id}')
     def edit_group(group_id: int, name: str = Form(...), seller: str = Form(''), distributor_id: str = Form(''),
@@ -261,15 +293,14 @@ def install_worksheet(app, templates, context):
         return RedirectResponse(f'/groups#group-{group.id}', 303)
 
     @app.get('/credits')
-    def credits_page(request: Request, db=Depends(get_db)):
-        return templates.TemplateResponse(request, 'seller_credits.html', context(request, **worksheet_data(db),
-            entries=db.scalars(select(SellerCreditEntry).order_by(SellerCreditEntry.id.desc())).all(),
-            customers=db.scalars(select(Customer).order_by(Customer.code)).all(), today=date.today(), token=secrets.token_hex(16)))
+    def credits_page():
+        # Seller prepayments and credit live in Workspace > Money.
+        return RedirectResponse('/money?focus=seller-credit', 303)
 
     @app.post('/credits/prepay')
     def record_prepay(group_id: int = Form(...), item_id: str = Form(''), customer_id: str = Form(''),
                       amount: str = Form(...), stage: str = Form(...), payment_date: date = Form(...),
-                      reference: str = Form(...), token: str = Form(...), db=Depends(get_db)):
+                      reference: str = Form(...), token: str = Form(...), next: str = Form(''), db=Depends(get_db)):
         lock_ledger(db)
         key = 'prepay:'+token[:64]
         if db.scalar(select(SellerCreditEntry.id).where(SellerCreditEntry.operation_key == key)):
@@ -296,11 +327,11 @@ def install_worksheet(app, templates, context):
                                 date=payment_date, reference=reference.strip()[:500], operation_key=key))
         audit(db, 'SellerCreditAccount', account.id, f'Recorded {value} {group.currency} seller prepayment ({stage}). {reference}')
         db.commit()
-        return RedirectResponse('/credits', 303)
+        return RedirectResponse(safe_next(next, '/credits'), 303)
 
     @app.post('/credits/transfer')
     def transfer(source_id: int = Form(...), target_group_id: int = Form(...), amount: str = Form(...),
-                 reference: str = Form(...), token: str = Form(...), db=Depends(get_db)):
+                 reference: str = Form(...), token: str = Form(...), next: str = Form(''), db=Depends(get_db)):
         lock_ledger(db)
         key = 'transfer:'+token[:64]
         if db.scalar(select(SellerCreditEntry.id).where(SellerCreditEntry.operation_key == key+':out')):
@@ -314,11 +345,11 @@ def install_worksheet(app, templates, context):
         except ValueError as exc:
             raise HTTPException(422, str(exc))
         db.commit()
-        return RedirectResponse('/credits', 303)
+        return RedirectResponse(safe_next(next, '/credits'), 303)
 
     @app.post('/credits/settle')
     def settle(account_id: int = Form(...), amount: str = Form(...), kind: str = Form(...),
-               reference: str = Form(...), token: str = Form(...), db=Depends(get_db)):
+               reference: str = Form(...), token: str = Form(...), next: str = Form(''), db=Depends(get_db)):
         lock_ledger(db)
         key = 'settle:'+token[:64]
         if db.scalar(select(SellerCreditEntry.id).where(SellerCreditEntry.operation_key == key)):
@@ -333,4 +364,4 @@ def install_worksheet(app, templates, context):
                                 reference=reference.strip()[:500], operation_key=key))
         audit(db, 'SellerCreditAccount', account.id, f'{kind}: {value}; {reference}')
         db.commit()
-        return RedirectResponse('/credits', 303)
+        return RedirectResponse(safe_next(next, '/credits'), 303)

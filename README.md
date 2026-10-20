@@ -2,14 +2,19 @@
 
 A clean FastAPI/SQLite workspace for fashion orders, customer records, collections, payments, shipping, product images, Excel exports, and customer PDFs.
 
-## Start here (testing copy, 2026-10-18)
+## Start here (testing copy, 2026-10-20)
 
-- Everyday work: **Intake** (`/intake`) — upload or describe, answer the questions, correct, save once,
+- Four areas: **Overview**, **Workspace**, **Inbox**, **Customers**; Search, AI Help, Add and Settings sit in the
+  top bar. Where every former tab went: [docs/navigation-guide.md](docs/navigation-guide.md).
+- Everyday work: **Inbox** (`/inbox`) — upload or describe, answer the questions, correct, save once,
   download Excel. Guide: [docs/operator-guide.md](docs/operator-guide.md).
 - Google Drive and Gmail: [docs/drive-gmail-setup.md](docs/drive-gmail-setup.md) (account setup pending).
 - Backups and restore: [docs/backup-restore.md](docs/backup-restore.md).
 - What changed, how it was checked, what remains: [docs/IMPLEMENTATION_PROGRESS.md](docs/IMPLEMENTATION_PROGRESS.md).
 - Run: `start-local.ps1` (127.0.0.1:8001). Tests: `..\alina-fashion\.venv\Scripts\python.exe -m pytest -q`.
+- Look at the interface with synthetic data only: `..\alina-fashion\.venv\Scripts\python.exe scripts\ui_preview.py`
+  (copies the app to `tmp/ui-preview`, seeds sample records, serves 127.0.0.1:8001 with AI and Google off;
+  `--reseed` starts over). Old-to-new feature map: [docs/ui-feature-map.md](docs/ui-feature-map.md).
 
 ## What is included
 
@@ -28,7 +33,7 @@ A clean FastAPI/SQLite workspace for fashion orders, customer records, collectio
 - customer-by-customer Ready collection checks so one client's overpayment cannot hide another client's missing payment;
 - separate customer-money and factory-liability ledgers, with optional factory-order payment allocation;
 - a supplier Ready-list processor that matches products, creates the Ready batch, updates liabilities, and generates PDFs only for affected customers;
-- an operations Inbox that shows exceptions and the next actions instead of requiring every page to be checked;
+- an Overview with the season's figures and the next actions, so not every page has to be checked;
 - privacy-filtered customer PDFs containing customer-facing products, final prices, payments, delivery charges/status, and balance only, plus all-customer, Ready-batch-only, and outstanding-only ZIPs;
 - calculation, real-workbook import, workflow, and PDF-isolation tests.
 
@@ -46,7 +51,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
 For private GitHub upload and phone-accessible hosting, follow [DEPLOYMENT.md](DEPLOYMENT.md). The hosted Blueprint requires a website password and keeps business data on a persistent disk.
 
-The database starts empty. Use **Import** in the app, or initialize it from a master workbook on the command line:
+The database starts empty. Use **Workspace › Excel & statements › Import original master workbook** in the app, or initialize it from a master workbook on the command line:
 
 ```powershell
 .venv\Scripts\python.exe scripts\bootstrap_ss26.py "C:\Users\user\Downloads\Отчет_SS26 AA.xlsx"
@@ -54,7 +59,7 @@ The database starts empty. Use **Import** in the app, or initialize it from a ma
 
 Uploading the identical file is idempotent. A revised master workbook is imported incrementally: unchanged source rows are skipped, safe new/changed rows are applied, and changes to Ready, shipped, or otherwise advanced items are preserved for human review instead of being overwritten.
 
-After the master import, the normal recurring flow is **Ready batches → Process a supplier Ready list**. The file needs an `Article`/`SKU` column; `Brand`, `Customer`/`Allocation`, `Size`, `Quantity`, and `Ready` are supported when present. Conflicts and ambiguous matches go to Import Review. Successfully matched products update the dashboard and produce a ZIP containing a fresh statement for each affected customer.
+After the master import, the normal recurring flow is **Workspace › Ready & shipping → Process a Ready list** (also **Add › Supplier Ready list**). The file needs an `Article`/`SKU` column; `Brand`, `Customer`/`Allocation`, `Size`, `Quantity`, and `Ready` are supported when present. Conflicts and ambiguous matches go to Import Review. Successfully matched products update the dashboard and produce a ZIP containing a fresh statement for each affected customer.
 
 ## Test
 
@@ -66,7 +71,7 @@ The test suite distinguishes mathematical exact values, two-decimal accounting v
 
 ### Multimodal AI intake
 
-Open `/ai-intake` and use any combination of a typed note, speech-to-text, product photos, PDF, Excel/CSV, or text files. A submission can create several independent drafts when the sources describe several customers or products. AI associates relevant uploaded product photos with the corresponding drafts; the selected temporary preview becomes that row's managed product image when the row is saved. Required business fields still prevent incomplete rows from being created.
+Open **Inbox › Other ways to add › Quick AI draft table** (`/ai-intake`) and use any combination of a typed note, speech-to-text, product photos, PDF, Excel/CSV, or text files. A submission can create several independent drafts when the sources describe several customers or products. AI associates relevant uploaded product photos with the corresponding drafts; the selected temporary preview becomes that row's managed product image when the row is saved. Required business fields still prevent incomplete rows from being created.
 
 For faster entry, uploaded photos suppress unnecessary web-image search for the matching draft and remaining image searches run concurrently. Brand tables are preselected only from a confident catalog or brand-name match; ambiguous brands stay unselected. A row can be saved without leaving the page, and **Create all drafts** saves every complete unsaved draft sequentially with visible progress. Failed or incomplete drafts stop safely without duplicating already saved rows in the active page.
 
@@ -78,19 +83,26 @@ The private SearXNG service is defined in `infra/searxng` and binds only to `127
 
 ## Navigation
 
-- **Dashboard** - season/brand totals, dynamic shipments, saldo, customer paid/charged/payable, and factory required/paid/balance.
-- **Inbox** - exceptions-only work queue for import review, allocations, collections, factory payments, shipping, and outstanding customers.
-- **Orders** - normalized order list and derived amounts.
-- **New table** - guided season/customer/brand setup, copied rules, bulk Excel paste, deterministic preview, and all-or-nothing creation.
-- **Customers** - isolated account tables with initial payment, Ready balance, transport, status, expected receipt, and delivery state.
-- **Ready batches** - Ready 1/2/3-style liabilities, customer collections, and factory payments.
-- **Shipments** - rule-driven transport with destination exemptions and separate fixed logistics, suitcase, bag, and exceptional costs.
-- **Payments** - auditable customer payments/refunds allocated to initial or Ready stages.
-- **Validation** - SYSTEM CHECK with blocking errors and warnings.
-- **Reports** - one PDF per customer or an all-customer ZIP.
-- **Import** - initial or incremental `.xlsx` import, before/after change history, and raw Import Review queue.
-- **Rules** - editable Brand + Season financial configuration.
-- **Audit log** - linked from the footer.
+Four areas, plus Search (Ctrl K), AI Help, **Add** and **Settings** in the top bar. Phones keep the same four
+areas in a bottom bar with Add in the middle. Old URLs (`/orders`, `/payments`, `/shipments`, `/ready-batches`,
+`/groups`, `/credits`, `/operations`, `/intake`, `/storage`) redirect to their new place and keep their filters.
+
+- **Overview** (`/`) - season figures (order value, customers still to pay, factory balance, Ready not shipped),
+  next actions, the season by brand, and System Check, Inbox and backup status cards.
+- **Workspace** (`/worksheet`) - one switch with four views:
+  - **Products** - the colour-coded worksheet with filters, optional columns, bulk changes and product pages;
+  - **Brands** - the season table by brand and each brand table (`/seasons/{season}`, `/orders/{id}`);
+  - **Ready & shipping** (`/logistics`) - Ready lists and batches, factory payments per batch, shipments,
+    exceptional expenses, shipment groups and distributors;
+  - **Money** (`/money`) - customer payments and refunds, factory payments, seller credit.
+  The **Excel & statements** menu in the same bar holds the editable workbook, uploads, templates, season and
+  business workbooks, statement ZIPs and the master-workbook import.
+- **Inbox** (`/inbox`) - new intake, intakes in progress, captured uploads/Drive/e-mail, background jobs, and
+  source and allocation reviews.
+- **Customers** (`/customers`) - balances per season, each customer's profile, goods, money, statements and
+  files (shareable customer Excel kept apart from the private internal Excel).
+- **Settings** (`/settings`) - Business (rules, library), Connections (Drive, Gmail, captured sources),
+  Recovery (backups and restore, clean-up and reset), History and checks (audit, System Check, imports).
 
 Read-only JSON endpoints are also available at `/api/dashboard` and `/api/validation`; OpenAPI is at `/docs`.
 
@@ -184,6 +196,6 @@ See `docs/workbook-analysis.md` for the cell/formula analysis and `docs/business
 
 No source workbook, extracted image, generated statement, or seeded business record is committed as live application data. Imported source copies are retained under timestamped folders in `data/imports/` for auditability until the operator intentionally archives them. The original files selected by the user are never modified.
 
-Each tracked import on the Import page has a **Delete stored file** action. It removes only the timestamped project copy; normalized accounting records, review decisions, and the audit trail remain intact. This is intentional—a source-file cleanup must never silently alter financial totals.
+Each tracked import on the Import page (Workspace › Excel & statements › Import original master workbook) has a **Delete stored file** action. It removes only the timestamped project copy; normalized accounting records, review decisions, and the audit trail remain intact. This is intentional—a source-file cleanup must never silently alter financial totals.
 
-The Import page also has a typed-confirmation **Delete all imported data** action for starting over. It clears every business table plus managed source workbooks, extracted product images, and generated PDFs/ZIPs. Application code and original files outside the project are never removed.
+**Settings › Recovery › Clean-up and reset** has the typed-confirmation reset for starting over. It clears every business table plus managed source workbooks, extracted product images, and generated PDFs/ZIPs. Application code and original files outside the project are never removed.

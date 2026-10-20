@@ -116,7 +116,8 @@ def _inspect_image(filename: str, content: bytes) -> tuple[str, int, int]:
                 detected_format = image.format
             with Image.open(io.BytesIO(content)) as image:
                 width, height = image.size
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+    # Pillow reports a broken PNG chunk checksum as SyntaxError.
+    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         raise ValueError(f"{filename}: unsupported or damaged image") from None
     if detected_format not in FORMAT_EXTENSIONS:
         raise ValueError(f"{filename}: use JPG, PNG, or WEBP")

@@ -4,13 +4,13 @@ Implemented in the isolated local app at `http://127.0.0.1:8001`. The live phone
 
 ## Everyday use
 
-1. Open **Excel files** and download the editable workbook, or the blank template for new products/seasons.
+1. Open **Workspace → Excel & statements → Edit in Excel** and download the editable workbook, or the blank template for new products/seasons.
 2. Edit the **Orders** sheet. Keep the headers, existing IDs and hidden exchange sheet. Leave ID empty for a new product. Set the status dropdown: yellow In process, green Done, white Not completed.
 3. Upload the edited file, review the before/after values, fix any errors, then Apply. Download a fresh copy for the next edit.
 
 Removing a spreadsheet row never deletes its product. Existing season/brand and customer names are references; customer assignment uses the code. New customer codes require names. Group IDs must exist in the same season; create groups and set seller, distributor and special costs in the app. Payments and shipment records are never overwritten by Excel.
 
-The full business accounting export remains available under advanced reference reports; it is not the editable upload format. The original SS26 importer remains separate. Other supplier layouts, photos and PDFs can be read through **AI to table**. Large AI spreadsheets fail with an explanation rather than silently truncating rows; use the deterministic Excel workflow for large updates.
+The full business accounting export remains available under advanced reference reports; it is not the editable upload format. The original SS26 importer remains separate. Other supplier layouts, photos and PDFs can be read through the **Inbox** (new intake) or **Inbox → Other ways to add → Quick AI draft table**. Large AI spreadsheets fail with an explanation rather than silently truncating rows; use the deterministic Excel workflow for large updates.
 
 ## AI and source evidence
 
@@ -26,9 +26,9 @@ Excel downloads keep their comparison baseline in `data/excel-exchange`. Upload 
 
 Seller-credit ownership and dispatched group membership are protected. Product edits do not rewrite logistics status, source evidence or seller ledger entries. Cancelled source rows remain excluded from accounting until reviewed through the full editor.
 
-**Issues & suggestions** links to product, rule, shipment, payment or source-review screens. Source review closure requires a recorded explanation. Allocation reviews cannot close until every exactly matched source product has a confirmed customer. Closing a source note does not dismiss automated data checks.
+**System Check** (Overview card) links to product, rule, shipment, payment or source-review screens. Source review closure requires a recorded explanation. Allocation reviews cannot close until every exactly matched source product has a confirmed customer. Closing a source note does not dismiss automated data checks.
 
-Automatic local backups are retained. Google Drive remains an optional connection requiring account setup/sign-in on **Storage & backups**; this change does not create a connection or send email.
+Automatic local backups are retained. Google Drive remains an optional connection requiring account setup/sign-in under **Settings → Connections**; this change does not create a connection or send email.
 
 ## Verification
 

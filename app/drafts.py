@@ -973,6 +973,8 @@ def commit_session(db: Session, session: IntakeSession, *, operation_key: str, e
             results.append({"row": row.position, "action": "payment", "payment_id": payment.id,
                             "type": payment.type, "amount": str(payment.amount)})
         db.flush()
+        # Order.items was loaded for the "before" totals; re-read it so "after" includes the rows just saved.
+        db.expire_all()
         after = _statement_totals(db, affected, season_name)
         for source in session.sources:
             if source.state not in {"failed", "ignored"}:

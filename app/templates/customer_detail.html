@@ -1,11 +1,136 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}{{ statement.customer.name or statement.customer.code }}{% endblock %}
 {% block content %}
-<section class="page-head"><div><p class="eyebrow">Customer profile · {{ statement.season.name }}</p><h1>{{ statement.customer.name or statement.customer.code }}</h1><p>Only this customer's products, payments, Ready goods, shipments, transport and balance from the selected season.</p></div><div class="page-head-actions"><form method="get" class="season-picker"><label>Season<select name="season" onchange="this.form.submit()">{% for option in seasons %}<option value="{{ option.name }}" {{ 'selected' if option.id == statement.season.id else '' }}>{{ option.name }}</option>{% endfor %}</select></label></form><a class="button" href="/exports/customers/{{ statement.customer.id }}.xlsx?season={{ statement.season.name }}" title="Customer-facing: no wholesale costs">Customer Excel</a><a class="button" href="/exports/customers/{{ statement.customer.id }}/internal.xlsx?season={{ statement.season.name }}" title="Internal: includes wholesale costs and markup">Internal Excel</a><a class="button primary" href="/reports/customers/{{ statement.customer.id }}/pdf?season={{ statement.season.name }}">Generate PDF</a></div></section>
-{% if request.query_params.get('saved') %}<section class="manual-success"><span>✓</span><div><strong>Customer profile saved</strong><p>All provided details are now stored here.</p></div></section>{% endif %}
-<section class="customer-profile-panel"><div class="customer-profile-summary"><span class="customer-avatar large">{{ (statement.customer.name or statement.customer.code)[:1]|upper }}</span><div><strong>{{ statement.customer.name or 'Unnamed customer' }}</strong><small>Internal code {{ statement.customer.code }}</small><p>{{ statement.customer.phone or 'No phone' }}{% if statement.customer.email %} · {{ statement.customer.email }}{% endif %}</p><p>{{ statement.customer.address or '' }}{% if statement.customer.city %} · {{ statement.customer.city }}{% endif %}{% if statement.customer.country_code %} · {{ statement.customer.country_code }}{% endif %}</p></div></div><form class="customer-profile-form" action="/customers/{{ statement.customer.id }}/settings" method="post"><input type="hidden" name="return_to" value="detail"><label>Name<input name="name" value="{{ statement.customer.name or '' }}"></label><label>Phone<input name="phone" value="{{ statement.customer.phone or '' }}"></label><label>Email<input type="email" name="email" value="{{ statement.customer.email or '' }}"></label><label>Preferred contact<select name="preferred_contact"><option value="">Not specified</option>{% for choice in ['Phone','WhatsApp','Telegram','Email'] %}<option {{ 'selected' if statement.customer.preferred_contact == choice else '' }}>{{ choice }}</option>{% endfor %}</select></label><label>Country code<input name="country_code" maxlength="2" value="{{ statement.customer.country_code or '' }}"></label><label>City<input name="city" value="{{ statement.customer.city or '' }}"></label><label>Postal code<input name="postal_code" value="{{ statement.customer.postal_code or '' }}"></label><label class="wide-field">Address<input name="address" value="{{ statement.customer.address or '' }}"></label><label class="wide-field">Notes<textarea name="notes" rows="3">{{ statement.customer.notes or '' }}</textarea></label><label>Add another alias<input name="alias" placeholder="Optional short code"></label><button class="button primary" type="submit">Save customer profile</button></form><p class="customer-aliases">Known aliases: {{ statement.customer.aliases|map(attribute='alias')|join(', ') or 'none' }}</p></section>
-<section class="kpis small"><article><span>Total ordered</span><strong>{{ statement.ordered|money }}</strong></article><article><span>Initial payment</span><strong>{{ statement.initial_prepayment|money }}</strong></article><article><span>Ready 50% due</span><strong>{{ statement.ready_balance_due|money }}</strong></article><article><span>Paid</span><strong>{{ statement.account.total_paid|money }}</strong></article><article><span>Balance</span><strong>{{ statement.account.outstanding|money }}</strong></article></section>
-<section class="panel"><div class="panel-head"><div><p class="eyebrow">Complete history</p><h2>All customer products</h2></div></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Brand</th><th>Article / product</th><th>Color</th><th>Size</th><th>Qty</th><th>Final</th><th>Ready batch</th><th>Shipment</th><th>Status</th><th>Stored details</th></tr></thead><tbody>{% for item in statement.items %}<tr><td>{{ item.order.brand.name }}</td><td class="text">{{ item.article or '-' }}<br>{{ item.name or '-' }}</td><td>{{ item.color or '-' }}</td><td>{{ item.size or '-' }}</td><td>{{ item.quantity }}</td><td>{{ item_amounts(item).final|money }}</td><td>{{ item.ready_batch.name if item.ready_batch else '-' }}</td><td>{{ item.shipment.name if item.shipment else '-' }}</td><td>{{ item.status }}</td><td class="text"><details><summary>View</summary><small>Delivery: {{ item.requested_delivery_date or '-' }}<br>Logistics: {{ item.logistics_preference or '-' }}<br>Requirements: {{ item.customer_requirements or '-' }}<br>Product link: {% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener">open</a>{% else %}-{% endif %}<br>Source: {{ item.source_file or '-' }}</small></details></td></tr>{% endfor %}</tbody></table></div></section>
-<section class="panel"><h2>Shipments</h2><div class="table-scroll"><table class="data-table"><thead><tr><th>Sped</th><th>Items</th><th>Allocated transport / costs</th><th>Status</th><th>Expected receipt</th></tr></thead><tbody>{% for shipment_id, items in statement.shipments.items() %}{% set shipment = items[0].shipment %}<tr><th>{{ shipment.name }}</th><td class="text">{{ items|map(attribute='article')|select|join(', ') }}</td><td>{{ statement.shipment_costs.get(shipment_id, 0)|money }}</td><td>{{ shipment.status }}</td><td>{{ statement.shipment_expected_receipts.get(shipment_id) or 'pending payment' }}</td></tr>{% else %}<tr><td colspan="5">No shipments</td></tr>{% endfor %}</tbody></table></div></section>
-<section class="two-col"><article class="panel compact"><h2>Charges</h2><dl class="totals-list"><div><dt>Initial factory prepayment</dt><dd>{{ statement.initial_prepayment|money }}</dd></div><div><dt>Ready balances</dt><dd>{{ statement.ready_balance_due|money }}</dd></div><div><dt>Transport</dt><dd>{{ statement.transport_costs|money }}</dd></div><div><dt>Fixed / suitcase / imported source costs</dt><dd>{{ (statement.allocated_costs - statement.transport_costs)|money }}</dd></div><div class="strong"><dt>Total charged</dt><dd>{{ statement.account.total_charged|money }}</dd></div></dl></article><article class="panel compact"><h2>Payments</h2><table class="data-table"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead><tbody>{% for payment in statement.payments %}<tr><td>{{ payment.date }}</td><td>{{ payment_labels.get(payment.type, payment.type) }}</td><td>{{ payment.note or '-' }}</td><td>{{ signed_payment(payment.amount, payment.type)|money }}</td></tr>{% endfor %}</tbody></table></article></section>
-<section class="wb-card"><h2>Workbook & retained products</h2><p class="wb-muted">Group special costs included in this customer's charges: {{ statement.group_special_costs|money }} €. White / cancelled products remain in the workbook; seller prepayments are tracked separately from customer payments.</p><a class="button" href="/worksheet?customer={{ statement.customer.id }}&season={{ statement.season.id }}">See every product in the color-coded workbook</a>{% if statement.archived_items %}<div class="wb-table-scroll"><table class="wb-table wb-compact"><thead><tr><th>Product</th><th>Brand / size</th><th>Source</th><th>Status</th></tr></thead><tbody>{% for item in statement.archived_items %}<tr><td><a href="/worksheet/items/{{ item.id }}">{{ item.article or item.name }}</a></td><td>{{ item.order.brand.name }} / {{ item.size or '—' }}</td><td>{{ item.source_sheet }} · row {{ item.source_row }}</td><td>Not completed / source amount needs review</td></tr>{% endfor %}</tbody></table></div>{% endif %}</section>
+{% set c = statement.customer %}
+{% set sname = statement.season.name %}
+{% set sq = '?season=' ~ (sname|urlencode) %}
+{% set here = '/customers/' ~ c.id ~ sq %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/customers{{ sq }}">Customers</a><span aria-hidden="true">/</span><span>{{ c.name or c.code }}</span></nav>
+<header class="page-header">
+  <div class="person-head">
+    <span class="avatar" aria-hidden="true">{{ (c.name or c.code)[:1]|upper }}</span>
+    <div><h1>{{ c.name or c.code }}</h1><p class="page-sub">Code {{ c.code }}{% if c.country_code %} · {{ c.country_code }}{% endif %}{% if c.phone %} · {{ c.phone }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %} · {{ sname }}</p></div>
+  </div>
+  <div class="page-actions">
+    {{ ui.season_select(seasons, statement.season) }}
+    <a class="btn primary" href="/reports/customers/{{ c.id }}/pdf{{ sq }}">{{ ui.icon('download') }}Statement PDF</a>
+    <details class="menu">
+      <summary class="btn">{{ ui.icon('sheet') }}Excel<span class="chev">{{ ui.icon('chev') }}</span></summary>
+      <div class="menu-panel" role="menu">
+        <a class="menu-item" role="menuitem" href="/exports/customers/{{ c.id }}.xlsx{{ sq }}" title="Customer-facing: no wholesale costs">{{ ui.icon('sheet') }}<span>Customer Excel<small>Safe to share with {{ c.name or c.code }}: no wholesale prices, markup, notes or other customers</small></span></a>
+        <a class="menu-item private" role="menuitem" href="/exports/customers/{{ c.id }}/internal.xlsx{{ sq }}" title="Internal: includes wholesale costs and markup">{{ ui.icon('lock') }}<span>Internal Excel<small>Contains wholesale costs and markup. Do not share.</small></span></a>
+      </div>
+    </details>
+  </div>
+</header>
+
+{% if request.query_params.get('saved') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Customer profile saved</strong><p>All provided details are stored, and the change is in the history below.</p></div></div>{% endif %}
+{% if request.query_params.get('paid') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Payment recorded</strong><p>The balance below already includes it.</p></div></div>{% endif %}
+
+<div class="figures" style="--cols:5">
+  <div class="figure"><span class="figure-label">Ordered</span><span class="figure-value">{{ statement.ordered|moneynb }}</span><span class="figure-sub">{{ statement.items|length }} product{{ '' if statement.items|length == 1 else 's' }}</span></div>
+  <div class="figure"><span class="figure-label">Initial payment</span><span class="figure-value">{{ statement.initial_prepayment|moneynb }}</span></div>
+  <div class="figure"><span class="figure-label">Ready balance due</span><span class="figure-value">{{ statement.ready_balance_due|moneynb }}</span></div>
+  <div class="figure"><span class="figure-label">Received</span><span class="figure-value">{{ statement.account.total_paid|moneynb }}</span><span class="figure-sub">of {{ statement.account.total_charged|moneynb }} charged</span></div>
+  <div class="figure {{ 'alert' if statement.account.outstanding > 0 else '' }}"><span class="figure-label">{{ 'Still to pay' if statement.account.outstanding > 0 else ('In credit' if statement.account.overpayment > 0 else 'Balance') }}</span><span class="figure-value">{{ (statement.account.outstanding if statement.account.outstanding > 0 else statement.account.overpayment)|moneynb }}<span class="unit">{{ currency }}</span></span></div>
+</div>
+
+<div class="split">
+  <div>
+    <section class="section" aria-labelledby="goods-title">
+      <div class="section-head"><h2 id="goods-title">Goods</h2><a class="btn sm" href="/worksheet?customer={{ c.id }}&amp;season={{ statement.season.id }}">Open in Workspace</a></div>
+      <div class="table-frame"><table class="table">
+        <thead><tr><th>Product</th><th>Brand</th><th>Colour</th><th>Size</th><th class="num">Qty</th><th class="num">Final</th><th>Ready batch</th><th>Shipment</th><th>Status</th><th>Details</th></tr></thead>
+        <tbody>{% for item in statement.items %}<tr>
+          <td><a href="/worksheet/items/{{ item.id }}">{{ item.name or item.article or ('Product ' ~ item.id) }}</a><small>{{ item.article or '—' }}</small></td>
+          <td>{{ item.order.brand.name }}</td><td>{{ item.color or '—' }}</td><td>{{ item.size or '—' }}</td><td class="num">{{ item.quantity }}</td><td class="num">{{ item_amounts(item).final|money }}</td>
+          <td>{{ item.ready_batch.name if item.ready_batch else '—' }}</td><td>{{ item.shipment.name if item.shipment else '—' }}</td><td>{{ item.status }}</td>
+          <td><details><summary>View</summary><small>Delivery by: {{ item.requested_delivery_date or '—' }}<br>Logistics: {{ item.logistics_preference or '—' }}<br>Requirements: {{ item.customer_requirements or '—' }}<br>Product link: {% if item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener">open</a>{% else %}—{% endif %}<br>Source: {{ item.source_file or '—' }}</small></details></td>
+        </tr>{% else %}<tr class="table-empty"><td colspan="10">No products for {{ c.name or c.code }} in {{ sname }}.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+
+    <section class="section" aria-labelledby="shipments-title">
+      <div class="section-head"><h2 id="shipments-title">Shipments</h2></div>
+      <div class="table-frame"><table class="table">
+        <thead><tr><th>Shipment</th><th>Items</th><th class="num">Allocated transport and costs</th><th>Status</th><th>Expected receipt</th></tr></thead>
+        <tbody>{% for shipment_id, items in statement.shipments.items() %}{% set shipment = items[0].shipment %}<tr><th>{{ shipment.name }}</th><td class="text">{{ items|map(attribute='article')|select|join(', ') or items|length ~ ' item(s)' }}</td><td class="num">{{ statement.shipment_costs.get(shipment_id, 0)|money }}</td><td><span class="badge">{{ shipment.status }}</span></td><td>{{ statement.shipment_expected_receipts.get(shipment_id) or 'after payment' }}</td></tr>
+        {% else %}<tr class="table-empty"><td colspan="5">No shipments yet.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+
+    {% if statement.archived_items or statement.group_special_costs %}
+    <section class="section" aria-labelledby="retained-title">
+      <div class="section-head"><div><h2 id="retained-title">Retained in the worksheet</h2><p>Group special costs included in the charges: {{ statement.group_special_costs|money }} {{ currency }}. Not-completed or cancelled products stay visible; seller prepayments are tracked separately from customer payments.</p></div></div>
+      {% if statement.archived_items %}<div class="table-frame"><table class="table"><thead><tr><th>Product</th><th>Brand / size</th><th>Source</th><th>Status</th></tr></thead><tbody>{% for item in statement.archived_items %}<tr><td><a href="/worksheet/items/{{ item.id }}">{{ item.article or item.name }}</a></td><td>{{ item.order.brand.name }} / {{ item.size or '—' }}</td><td>{{ item.source_sheet }} · row {{ item.source_row }}</td><td>{{ ui.swatch('pending', 'Not completed') }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  <aside>
+    <section class="panel" aria-labelledby="money-title">
+      <div class="section-head"><h2 id="money-title">Money</h2>{% if is_newest %}<button class="btn sm primary" type="button" data-open="record-payment">Record payment</button>{% endif %}</div>
+      <dl class="totals">
+        <div><dt>Initial prepayment</dt><dd>{{ statement.initial_prepayment|money }}</dd></div>
+        <div><dt>Ready balances</dt><dd>{{ statement.ready_balance_due|money }}</dd></div>
+        <div><dt>Transport</dt><dd>{{ statement.transport_costs|money }}</dd></div>
+        <div><dt>Fixed, suitcase and source costs</dt><dd>{{ (statement.allocated_costs - statement.transport_costs)|money }}</dd></div>
+        <div class="strong"><dt>Total charged</dt><dd>{{ statement.account.total_charged|money }}</dd></div>
+      </dl>
+      <h3>Payments</h3>
+      <ul class="history-list">{% for payment in statement.payments %}<li style="display:flex;justify-content:space-between;gap:10px"><span><time>{{ payment.date }}</time>{{ payment_labels.get(payment.type, payment.type) }}{% if payment.note %} · {{ payment.note }}{% endif %}</span><strong style="font-variant-numeric:tabular-nums">{{ signed_payment(payment.amount, payment.type)|money }}</strong></li>{% else %}<li class="muted">No payments in {{ sname }}.</li>{% endfor %}</ul>
+      {% if not is_newest %}<p class="muted" style="font-size:13px;margin:10px 0 0">New payments are recorded in the newest season, {{ seasons[0].name }}. <a href="/customers/{{ c.id }}?season={{ seasons[0].name|urlencode }}">Open {{ seasons[0].name }}</a> to record one.</p>{% endif %}
+    </section>
+
+    <section class="panel" aria-labelledby="profile-title">
+      <div class="section-head"><h2 id="profile-title">Profile</h2><button class="btn sm" type="button" data-open="edit-profile">Edit profile</button></div>
+      <dl class="facts">
+        <dt>Phone</dt><dd>{{ c.phone or '—' }}</dd>
+        <dt>E-mail</dt><dd>{{ c.email or '—' }}</dd>
+        <dt>Preferred contact</dt><dd>{{ c.preferred_contact or 'Not specified' }}</dd>
+        <dt>Address</dt><dd>{{ c.address or '—' }}{% if c.postal_code or c.city %}<br>{{ c.postal_code or '' }} {{ c.city or '' }}{% endif %}{% if c.country_code %}<br>{{ c.country_code }}{% endif %}</dd>
+        <dt>Aliases</dt><dd>{{ c.aliases|map(attribute='alias')|join(', ') or 'None' }}</dd>
+        {% if c.notes %}<dt>Notes</dt><dd>{{ c.notes }}</dd>{% endif %}
+      </dl>
+    </section>
+
+    <section class="panel" aria-labelledby="history-title">
+      <div class="section-head"><h2 id="history-title">History</h2><a href="/audit?entity=Customer&amp;id={{ c.id }}">Full history</a></div>
+      <ul class="history-list">{% for log in history %}<li><time>{{ log.timestamp.strftime('%Y-%m-%d %H:%M') if log.timestamp else '' }} · {{ log.source_user }}</time>{{ log.description }}</li>{% else %}<li class="muted">No recorded changes yet.</li>{% endfor %}</ul>
+    </section>
+  </aside>
+</div>
+
+{% call ui.drawer('edit-profile', 'Edit ' ~ (c.name or c.code), 'Contact details used on statements and for delivery.') %}
+<form class="form-grid" action="/customers/{{ c.id }}/settings" method="post" data-guard data-once>
+  <input type="hidden" name="return_to" value="detail"><input type="hidden" name="next" value="{{ here }}&amp;saved=1">
+  <label class="wide">Name<input name="name" value="{{ c.name or '' }}"></label>
+  <label>Phone<input name="phone" value="{{ c.phone or '' }}" autocomplete="off"></label>
+  <label>E-mail<input type="email" name="email" value="{{ c.email or '' }}" autocomplete="off"></label>
+  <label>Preferred contact<select name="preferred_contact"><option value="">Not specified</option>{% for choice in ['Phone', 'WhatsApp', 'Telegram', 'Email'] %}<option {{ 'selected' if c.preferred_contact == choice else '' }}>{{ choice }}</option>{% endfor %}</select></label>
+  <label>Country code<input name="country_code" maxlength="2" value="{{ c.country_code or '' }}" placeholder="IT"><small>Two letters; CH is exempt from percentage transport.</small></label>
+  <label>City<input name="city" value="{{ c.city or '' }}"></label>
+  <label>Postal code<input name="postal_code" value="{{ c.postal_code or '' }}"></label>
+  <label class="wide">Address<input name="address" value="{{ c.address or '' }}"></label>
+  <label class="wide">Notes<textarea name="notes" rows="3">{{ c.notes or '' }}</textarea></label>
+  <label>Add another alias<input name="alias" placeholder="Optional short code"><small>Known: {{ c.aliases|map(attribute='alias')|join(', ') or 'none' }}</small></label>
+  <div class="form-actions"><button class="btn primary" type="submit">Save customer profile</button></div>
+</form>
+{% endcall %}
+{% if is_newest %}
+{% call ui.drawer('record-payment', 'Record a payment from ' ~ (c.name or c.code), 'Recorded in ' ~ sname ~ '.') %}
+<form action="/payments" method="post" class="form-grid" data-once data-guard>
+  <input type="hidden" name="customer_id" value="{{ c.id }}"><input type="hidden" name="next" value="{{ here }}&amp;paid=1">
+  <label>Date<input type="date" name="payment_date" required></label>
+  <label>Amount ({{ currency }})<input type="number" min="0.01" step="0.01" name="amount" required></label>
+  <label>Type<select name="type"><option value="payment">Payment received</option><option value="refund">Refund to the customer</option></select></label>
+  <label>Allocate to<select name="stage"><option value="unallocated">Not yet (review later)</option><option value="initial">Initial prepayment</option><option value="ready">Ready balance</option></select></label>
+  <label>Factory / brand order<select name="order_id"><option value="">Several orders or later</option>{% for order in orders %}<option value="{{ order.id }}">{{ order.brand.name }}</option>{% endfor %}</select></label>
+  <label>Ready batch<select name="ready_batch_id"><option value="">None</option>{% for batch in ready_batches %}<option value="{{ batch.id }}">{{ batch.name }}</option>{% endfor %}</select><small>Required for a Ready balance.</small></label>
+  <label class="wide">Note<textarea name="note" rows="2"></textarea></label>
+  <div class="form-actions"><button class="btn primary">Record payment</button></div>
+</form>
+{% endcall %}
+{% endif %}
 {% endblock %}

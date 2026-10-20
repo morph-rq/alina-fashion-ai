@@ -1,35 +1,118 @@
 {% extends "base.html" %}
-{% block title %}Order workbook · Fashion Orders{% endblock %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Workspace{% endblock %}
 {% block content %}
-<div class="wb-heading"><div><p class="eyebrow">SEASON OPERATIONS / WORKBOOK</p><h1>Every order. One clear picture.</h1><p>Your Excel workflow, with products, people and payments kept together.</p></div><div class="wb-actions"><a class="button" href="/excel">↓ Excel files</a><a class="button primary" href="/manual-entry">+ Add product</a></div></div>
-<nav class="wb-tabs" aria-label="Workspace"><a class="active" href="/worksheet">Order workbook</a><a href="/excel">Excel files</a><a href="/ai-intake">AI to table</a><a href="/validation">Issues & suggestions</a><a href="/groups">Shipment groups</a><a href="/credits">Seller credit</a><a href="/storage">Storage & backups</a></nav>
-<div class="wb-overview"><button class="wb-stat process" type="button" data-state="process"><span><i class="state-dot process"></i> In process</span><strong>{{ counts.get('process',0) }} <small>product records</small></strong><p>Available or ordered with distributor</p></button><button class="wb-stat done" type="button" data-state="done"><span><i class="state-dot done"></i> Done</span><strong>{{ counts.get('done',0) }} <small>product records</small></strong><p>Completed · history stays visible</p></button><button class="wb-stat pending" type="button" data-state="pending"><span><i class="state-dot pending"></i> Not completed</span><strong>{{ counts.get('pending',0) }} <small>product records</small></strong><p>Waiting / unavailable · credit stays held</p></button><a class="wb-stat credit" href="/credits"><span>↗ Reusable seller credit</span><strong>{{ available|money }} <small>{{ currency }}</small></strong><p>{{ held|money }} total recorded money held</p></a></div>
-<section class="workbook-shell">
-{% if total_items and not accounts %}<div class="wb-meta"><span>Historical seller prepayments still need to be allocated to the correct seller, distributor and customer. <a href="/credits">Record existing prepayments →</a></span></div>{% endif %}
-<form class="wb-filter" method="get" action="/worksheet" id="workbook-filter"><label class="wb-search"><span class="sr-only">Search products, customers or brands</span><input type="search" name="q" value="{{ request.query_params.get('q','') }}" placeholder="Search product, customer, article, brand…"></label>
-<label><span>Season</span><select name="season"><option value="">All seasons</option>{% for s in seasons %}<option value="{{ s.id }}" {{ 'selected' if request.query_params.get('season') == s.id|string }}>{{ s.name }}</option>{% endfor %}</select></label>
-<label><span>Customer</span><select name="customer"><option value="">All customers</option><option value="0" {{ 'selected' if request.query_params.get('customer') == '0' }}>Needs allocation</option>{% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if request.query_params.get('customer') == c.id|string }}>{{ c.code }} · {{ c.name or 'Name not supplied' }}</option>{% endfor %}</select></label>
-<label><span>Distributor</span><select name="distributor"><option value="">All distributors</option><option value="0" {{ 'selected' if request.query_params.get('distributor') == '0' }}>Not assigned</option>{% for d in distributors %}<option value="{{ d.id }}" {{ 'selected' if request.query_params.get('distributor') == d.id|string }}>{{ d.name }}</option>{% endfor %}</select></label>
-<label><span>Arrange by</span><select name="by">{% for key,label in [('group','Shipment group'),('brand','Brand'),('customer','Customer'),('distributor','Distributor')] %}<option value="{{ key }}" {{ 'selected' if request.query_params.get('by','group') == key }}>{{ label }}</option>{% endfor %}</select></label>
-<label><span>Status</span><select name="state" id="state-filter"><option value="">All statuses</option>{% for key,label in status_labels.items() %}<option value="{{ key }}" {{ 'selected' if request.query_params.get('state') == key }}>{{ label }}</option>{% endfor %}</select></label><button class="button" type="submit">Filter</button><a class="wb-reset" href="/worksheet">Reset</a></form>
-<div class="wb-meta"><span><strong>{{ filtered_count }} / {{ total_items }}</strong> records shown · {{ units }} units in workspace</span><span>All records included, even cancelled and unallocated products</span></div>
-<form action="/worksheet/bulk" method="post" id="bulk-form">
-<div class="wb-bulk"><label><input type="checkbox" id="select-all"> Select visible</label><strong id="selection-count">0 selected</strong><select name="group_id" aria-label="Move selected products to group"><option value="">Keep current group</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }} · {{ g.distributor.name if g.distributor else 'No distributor' }}</option>{% endfor %}</select><select name="state" aria-label="Change selected status"><option value="">Keep current status</option>{% for key,label in status_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select><button class="button" type="submit" id="apply-selection" disabled>Apply to selection</button><a href="/groups">+ New group</a></div>
-{% for state, buckets in sections.items() %}
-<section class="wb-section {{ state }}" aria-label="{{ status_labels[state] }}">
-<div class="wb-section-head"><h2><i class="state-dot {{ state }}"></i>{{ status_labels[state] }}</h2><span>{% if state == 'process' %}Available / in order with distributor{% elif state == 'done' %}Completed products and shipment history{% else %}Not done yet / could not be completed · recorded prepayments remain available{% endif %}</span></div>
-{% if buckets %}<div class="wb-table-scroll" tabindex="0" aria-label="{{ status_labels[state] }} product table"><table class="wb-table"><thead><tr><th class="check-col"></th><th>Product / article</th><th>Customer</th><th>Brand / season</th><th>Color / size</th><th class="number">Qty</th><th class="number">Product value €</th><th class="number">Group cost €</th><th class="number">Recorded held €</th><th>Distributor / seller</th><th>Shipment / source</th><th></th></tr></thead><tbody>
-{% for label, records in buckets.items() %}<tr class="wb-group-row"><th colspan="12">{{ label }} <span>{{ records|length }} records · {{ records|sum(attribute='value')|money }} {{ currency }}</span></th></tr>
-{% for row in records %}{% set i = row.item %}<tr class="product-row" data-item-id="{{ i.id }}"><td><input type="checkbox" name="item_ids" value="{{ i.id }}" aria-label="Select product {{ i.article or i.name or i.id }}"></td><td><div class="wb-product"><div><a href="/worksheet/items/{{ i.id }}"><strong>{{ i.name or i.article or 'Description missing' }}</strong></a><small>{{ i.article or 'Article not supplied' }} · #{{ i.id }}</small>{% if i.status == 'Cancelled' %}<a class="wb-flag" href="/orders/{{ i.order_id }}#product-{{ i.id }}">Review source amount / cancelled →</a>{% endif %}{% if i.worksheet_note %}<a class="wb-flag" href="/worksheet/items/{{ i.id }}" title="{{ i.worksheet_note }}">Review source note →</a>{% endif %}</div></div></td>
-<td>{% if i.customer %}<a class="customer-chip" href="/customers/{{ i.customer.id }}?season={{ i.order.season.name }}">{{ i.customer.code }}</a><small>{{ i.customer.name or 'Name not supplied' }}</small>{% if i.customer.country_code %}<small>{{ i.customer.country_code }}</small>{% endif %}{% else %}<a class="wb-flag" href="/worksheet/items/{{ i.id }}">Needs allocation</a><small>{{ i.source_allocation_description or 'No confirmed customer' }}</small>{% endif %}</td><td>{{ i.order.brand.name }}<small>{{ i.order.season.name }}</small></td><td>{{ i.color or '—' }}<small>{% if i.size %}Size {{ i.size }}{% else %}<a class="wb-flag" href="/worksheet/items/{{ i.id }}">Confirm size →</a>{% endif %}</small></td><td class="number">{{ i.quantity }}</td><td class="number">{% if i.wholesale_unit_price is not none %}{{ row.value|money }}{% else %}<a class="wb-flag" href="/worksheet/items/{{ i.id }}">Add price →</a>{% endif %}</td><td class="number">{{ row.special|money }}</td><td class="number">{% if row.credit_recorded %}{{ row.credit|money }}{% else %}<span class="wb-muted">Not allocated</span>{% endif %}</td><td>{% if i.purchase_group %}{{ i.purchase_group.distributor.name if i.purchase_group.distributor else 'Not assigned' }}<small>{{ i.purchase_group.seller or 'Seller not supplied' }}</small>{% if not i.purchase_group.distributor or not i.purchase_group.seller %}<a class="wb-flag" href="/groups#group-{{ i.purchase_group_id }}">Assign distributor / seller →</a>{% endif %}{% else %}<a href="/groups">Create shipment group →</a>{% endif %}</td><td>{{ i.shipment.name if i.shipment else 'Not dispatched' }}<small>{{ i.source_sheet or 'Manual entry' }}{% if i.source_row %} · row {{ i.source_row }}{% endif %}</small></td><td><a class="wb-edit" href="/worksheet/items/{{ i.id }}" aria-label="Edit product {{ i.id }}">↗</a></td></tr>{% endfor %}{% endfor %}</tbody></table></div>
-{% else %}<div class="wb-empty">No products in this section{% if filtered_count != total_items %} match the current filters{% endif %}.</div>{% endif %}</section>{% endfor %}
+{% set qp = request.query_params %}
+{% set descriptions = {'process': 'Available, or ordered with the distributor', 'done': 'Completed; history stays visible', 'pending': 'Waiting or could not be completed; recorded prepayments stay held'} %}
+{{ ui.workspace_bar(current_season) }}
+<header class="page-header">
+  <div><h1>Products</h1><p class="page-sub">Every product record in one table, coloured as in the worksheet. Open a row to edit it; you return to this list with its filters.</p></div>
+</header>
+
+{% if saved_item %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Saved {{ saved_item.name or saved_item.article or ('product ' ~ saved_item.id) }}</strong><p>The change and its previous values are in the product's history.</p></div><a class="btn sm quiet" href="/worksheet/items/{{ saved_item.id }}?next={{ here|urlencode }}">Open it again</a></div>{% endif %}
+{% if updated_count %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ updated_count }} product{{ '' if updated_count == '1' else 's' }} updated</strong><p>Group cost shares were recalculated; recorded credit was preserved.</p></div></div>{% endif %}
+<div class="ws-states" role="group" aria-label="Filter by status">
+  {% for key, label in status_labels.items() %}
+  <button class="ws-state" type="button" data-state="{{ key }}" aria-pressed="{{ 'true' if qp.get('state') == key else 'false' }}">{{ ui.swatch(key, label) }}<span class="n">{{ counts.get(key, 0) }}</span></button>
+  {% endfor %}
+  <a class="ws-state credit" href="/money?focus=seller-credit">Seller credit available <span class="n">{{ available|money }} {{ currency }}</span></a>
+</div>
+
+<form class="filter-bar" method="get" action="/worksheet" id="workbook-filter" role="search" aria-label="Filter products">
+  {% set active = namespace(n=0) %}{% for key in ['season', 'brand', 'customer', 'state', 'distributor', 'group'] %}{% if qp.get(key) %}{% set active.n = active.n + 1 %}{% endif %}{% endfor %}{% set active_filters = active.n %}
+  <label class="search">Search<input type="search" name="q" value="{{ qp.get('q', '') }}" placeholder="Product, customer, article, brand, group…"></label>
+  <button class="btn filters-toggle" type="button" id="filters-toggle" aria-expanded="false" aria-controls="workbook-filter">Filters{% if active_filters %} ({{ active_filters }}){% endif %}</button>
+  <label>Season<select name="season"><option value="">All seasons</option>{% for s in seasons %}<option value="{{ s.id }}" {{ 'selected' if qp.get('season') == s.id|string }}>{{ s.name }}</option>{% endfor %}</select></label>
+  <label>Brand<select name="brand"><option value="">All brands</option>{% for b in brands %}<option value="{{ b.id }}" {{ 'selected' if qp.get('brand') == b.id|string }}>{{ b.name }}</option>{% endfor %}</select></label>
+  <label>Customer<select name="customer"><option value="">All customers</option><option value="0" {{ 'selected' if qp.get('customer') == '0' }}>Needs allocation</option>{% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if qp.get('customer') == c.id|string }}>{{ c.code }} · {{ c.name or 'name not supplied' }}</option>{% endfor %}</select></label>
+  <label>Status<select name="state" id="state-filter"><option value="">All statuses</option>{% for key, label in status_labels.items() %}<option value="{{ key }}" {{ 'selected' if qp.get('state') == key }}>{{ label }}</option>{% endfor %}</select></label>
+  <details class="more-filters" {{ 'open' if qp.get('distributor') or qp.get('group') or qp.get('by', 'group') != 'group' }}>
+    <summary>More filters and grouping</summary>
+    <div>
+      <label>Distributor<select name="distributor"><option value="">All distributors</option><option value="0" {{ 'selected' if qp.get('distributor') == '0' }}>Not assigned</option>{% for d in distributors %}<option value="{{ d.id }}" {{ 'selected' if qp.get('distributor') == d.id|string }}>{{ d.name }}</option>{% endfor %}</select></label>
+      <label>Arrange rows by<select name="by">{% for key, label in [('group', 'Shipment group'), ('brand', 'Brand'), ('customer', 'Customer'), ('distributor', 'Distributor')] %}<option value="{{ key }}" {{ 'selected' if qp.get('by', 'group') == key }}>{{ label }}</option>{% endfor %}</select></label>
+      {% if qp.get('group') %}<input type="hidden" name="group" value="{{ qp.get('group') }}"><p class="muted" style="margin:auto 0 8px">Showing one shipment group. <a href="/worksheet">Show all</a></p>{% endif %}
+    </div>
+  </details>
+  <div class="filter-actions"><button class="btn" type="submit">Apply</button>{% if filters_applied %}<a class="btn quiet" href="/worksheet">Reset filters</a>{% endif %}</div>
 </form>
-<div class="wb-foot"><span>Product values are planning values, including white products. Held credit means actual recorded seller payments, not a calculated 50%.</span><a href="/credits">View group-level credit →</a></div>
-</section>
-{% if not total_items %}<section class="wb-callout"><strong>Bring your workbook into the workspace.</strong><p>Import the source file to preserve all product records, customer notes and shipment allocations.</p><a class="button primary" href="/import">Import workbook</a></section>{% endif %}
-{% if total_items and rows|selectattr('item.purchase_group_id','none')|list|length %}<form action="/worksheet/group-unassigned" method="post" class="wb-callout"><p>Some products have no group. You can organize them using their existing shipment and source status.</p><button class="button">Group unassigned products</button></form>{% endif %}
-{% if reviews %}<details class="wb-reviews"><summary>{{ reviews|length }} source review notes · no source uncertainty is hidden</summary><div class="wb-table-scroll"><table class="wb-table"><thead><tr><th>Source</th><th>Reason</th><th>Original values</th><th>Next step</th></tr></thead><tbody>{% for review in reviews %}<tr><td>{{ review.sheet }} · {{ review.row or '—' }}</td><td>{{ review.reason }}</td><td><details><summary>Show source row</summary><pre>{{ review.raw_values }}</pre></details></td><td><a class="button" href="/source-reviews/import/{{ review.id }}">Review & resolve →</a></td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+
+<div class="ws-meta">
+  <span><strong>{{ filtered_count }}</strong> of {{ total_items }} records shown · {{ units }} units in the workspace, including cancelled and unallocated rows</span>
+  <span class="btn-row">
+    <label class="select-all"><input type="checkbox" id="select-all"> Select shown</label>
+    <button class="btn sm quiet" type="button" id="toggle-columns" aria-pressed="false">{{ ui.icon('columns') }}All columns</button>
+    <a class="btn sm quiet" href="/product-images">{{ ui.icon('image') }}Images</a>
+  </span>
+</div>
+
+<form action="/worksheet/bulk" method="post" id="bulk-form">
+  <input type="hidden" name="next" value="{{ here }}">
+  <div class="bulk-bar" id="bulk-bar" role="region" aria-label="Change selected products">
+    <strong id="selection-count">0 selected</strong>
+    <label><span class="sr-only">Move selected products to group</span><select name="group_id"><option value="">Keep current group</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }} · {{ g.distributor.name if g.distributor else 'no distributor' }}</option>{% endfor %}</select></label>
+    <label><span class="sr-only">Change status of selected products</span><select name="state"><option value="">Keep current status</option>{% for key, label in status_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+    <button class="btn" type="submit" id="apply-selection" disabled>Apply to selection</button>
+    <button class="btn quiet" type="button" id="clear-selection" style="color:#fff">Clear</button>
+    <a href="/logistics?focus=groups#do-new-group" style="color:#fff">New group</a>
+  </div>
+
+  {% for state, buckets in sections.items() %}
+  {% if buckets or not qp.get('state') %}
+  <section class="ws-section {{ state }}" aria-labelledby="section-{{ state }}">
+    <div class="ws-section-head"><h2 id="section-{{ state }}">{{ status_labels[state] }}</h2><span>{{ descriptions[state] }}</span></div>
+    {% if buckets %}
+    <div class="wb-table-scroll" tabindex="0" aria-label="{{ status_labels[state] }} products">
+      <table class="wb-table">
+        <thead><tr>
+          <th class="check-col"><span class="sr-only">Select</span></th><th>Product</th><th>Customer</th><th>Brand</th><th>Colour / size</th><th class="number">Qty</th><th class="number">Value {{ currency }}</th>
+          <th class="number opt">Group cost {{ currency }}</th><th class="number opt">Held {{ currency }}</th><th class="opt">Distributor / seller</th><th class="opt">Shipment / source</th><th><span class="sr-only">Open</span></th>
+        </tr></thead>
+        <tbody>
+        {% for label, records in buckets.items() %}
+          <tr class="wb-group-row"><th colspan="12">{{ label }}<span>{{ records|length }} record{{ '' if records|length == 1 else 's' }} · {{ records|sum(attribute='value')|money }} {{ currency }}</span></th></tr>
+          {% for row in records %}{% set i = row.item %}{% set item_url = '/worksheet/items/' ~ i.id ~ '?next=' ~ (here|urlencode) %}
+          <tr class="product-row" data-item-id="{{ i.id }}">
+            <td class="check"><input type="checkbox" name="item_ids" value="{{ i.id }}" aria-label="Select {{ i.name or i.article or ('product ' ~ i.id) }}"></td>
+            <td><div class="product-cell">
+              <div><a class="title" href="{{ item_url }}">{{ i.name or i.article or 'Description missing' }}</a><small>{{ i.article or 'No article' }} · #{{ i.id }}</small>
+                {% if i.status == 'Cancelled' %}<a class="flag" href="/orders/{{ i.order_id }}#product-{{ i.id }}">Cancelled; check source amount</a>{% endif %}
+                {% if i.worksheet_note %}<a class="flag" href="{{ item_url }}" title="{{ i.worksheet_note }}">Source note to review</a>{% endif %}</div>
+            </div></td>
+            <td>{% if i.customer %}<a class="customer-chip" href="/customers/{{ i.customer.id }}?season={{ i.order.season.name|urlencode }}">{{ i.customer.code }}</a><small>{{ i.customer.name or 'Name not supplied' }}{% if i.customer.country_code %} · {{ i.customer.country_code }}{% endif %}</small>{% else %}<a class="flag" href="{{ item_url }}">Needs allocation</a><small>{{ i.source_allocation_description or 'No confirmed customer' }}</small>{% endif %}</td>
+            <td>{{ i.order.brand.name }}<small>{{ i.order.season.name }}</small></td>
+            <td>{{ i.color or '—' }}<small>{% if i.size %}Size {{ i.size }}{% else %}<a class="flag" href="{{ item_url }}">Confirm size</a>{% endif %}</small></td>
+            <td class="number">{{ i.quantity }}</td>
+            <td class="number">{% if i.wholesale_unit_price is not none %}{{ row.value|money }}{% else %}<a class="flag" href="{{ item_url }}">Add price</a>{% endif %}</td>
+            <td class="number opt">{{ row.special|money }}</td>
+            <td class="number opt">{% if row.credit_recorded %}{{ row.credit|money }}{% else %}<span class="muted">Not allocated</span>{% endif %}</td>
+            <td class="opt">{% if i.purchase_group %}{{ i.purchase_group.distributor.name if i.purchase_group.distributor else 'Not assigned' }}<small>{{ i.purchase_group.seller or 'Seller not supplied' }}</small>{% if not i.purchase_group.distributor or not i.purchase_group.seller %}<a class="flag" href="/logistics?focus=groups#group-{{ i.purchase_group_id }}">Assign distributor and seller</a>{% endif %}{% else %}<a href="/logistics?focus=groups">Create a shipment group</a>{% endif %}</td>
+            <td class="opt">{{ i.shipment.name if i.shipment else 'Not dispatched' }}<small>{{ i.source_sheet or 'Manual entry' }}{% if i.source_row %} · row {{ i.source_row }}{% endif %}</small></td>
+            <td><a class="row-edit" href="{{ item_url }}" aria-label="Open product {{ i.id }}">{{ ui.icon('edit') }}</a></td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="ws-empty">No products in this section{% if filtered_count != total_items %} match the filters{% endif %}.</div>{% endif %}
+  </section>
+  {% endif %}
+  {% endfor %}
+</form>
+<p class="ws-foot">Values are planning values at the customer price, including not-completed products. “Held” is money actually recorded as paid to a seller, never a calculated share.</p>
+
+{% if not total_items %}
+{% call ui.empty('No products yet', 'Add a product, describe an order to the assistant, or import an existing master workbook to start.') %}
+  <a class="btn primary" href="/inbox#compose">Describe or upload an order</a><a class="btn" href="/manual-entry">Type a product</a><a class="btn" href="/import">Import a workbook</a>
+{% endcall %}
+{% endif %}
+{% if total_items and rows|selectattr('item.purchase_group_id', 'none')|list|length %}
+<form action="/worksheet/group-unassigned" method="post" class="notice info"><span class="notice-icon" aria-hidden="true">i</span><div><strong>Some products have no shipment group.</strong><p>Group them by their existing shipment and source status. No payments are inferred.</p></div><button class="btn">Group unassigned products</button></form>
+{% endif %}
+{% if reviews %}
+<details class="panel wb-reviews"><summary>{{ reviews|length }} source review note{{ '' if reviews|length == 1 else 's' }}: no source uncertainty is hidden</summary>
+  <div class="wb-table-scroll" style="margin-top:12px"><table class="wb-table"><thead><tr><th>Source</th><th>Reason</th><th>Original values</th><th></th></tr></thead><tbody>{% for review in reviews %}<tr><td>{{ review.sheet }} · row {{ review.row or '—' }}</td><td>{{ review.reason }}</td><td><details><summary>Show source row</summary><pre>{{ review.raw_values }}</pre></details></td><td><a class="btn sm" href="/source-reviews/import/{{ review.id }}">Review and resolve</a></td></tr>{% endfor %}</tbody></table></div>
+</details>
+{% endif %}
 {% endblock %}
-{% block scripts %}<script>
-(()=>{const form=document.getElementById('workbook-filter');document.querySelectorAll('[data-state]').forEach(button=>button.addEventListener('click',()=>{document.getElementById('state-filter').value=button.dataset.state;form.requestSubmit();}));const checks=[...document.querySelectorAll('input[name="item_ids"]')], all=document.getElementById('select-all');function update(){const n=checks.filter(c=>c.checked).length;document.getElementById('selection-count').textContent=n+' selected';document.getElementById('apply-selection').disabled=!n;all.checked=checks.length>0&&n===checks.length;all.indeterminate=n>0&&n<checks.length;}all.addEventListener('change',()=>{checks.forEach(c=>c.checked=all.checked);update();});checks.forEach(c=>c.addEventListener('change',update));})();
-</script>{% endblock %}

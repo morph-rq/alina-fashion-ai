@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Клиенты и наценки{% endblock %}
+{% block content %}
+<span hidden data-fx-ctx='{{ {'season': season.name if season else None}|tojson }}'></span>
+<header class="page-header">
+  <div>
+    <h1>Клиенты и наценки</h1>
+    <p class="page-sub">Наценка клиента считается от базовой цены: база × (1 + %). Она не зависит от процента фабрики. Ручная цена позиции всегда важнее правил.</p>
+  </div>
+  <div class="page-actions"><a class="btn quiet" href="/customers">Карточки клиентов</a>{{ ui.season_select(seasons, season, label='Сезон', action='/pricing') }}</div>
+</header>
+{% if ledger %}{% set s = ledger.settlement %}{% endif %}
+<section class="section">
+  <div class="section-head"><h2>Изменить наценку</h2></div>
+  <form class="panel fx-markup" id="fx-markup" data-season="{{ season.name if season else '' }}">
+    <div class="fx-row">
+      <label>Клиент <select name="customer" required>{% for c in customers if not c.is_owner %}<option value="{{ c.code }}">{{ c.code }}{{ ' — ' ~ c.name if c.name else '' }}</option>{% endfor %}</select></label>
+      <label>Наценка <input name="markup" required inputmode="decimal" size="5" placeholder="35">%</label>
+      <label>Где <select name="scope"><option value="">все сезоны (по умолчанию)</option>{% if season %}<option value="season" selected>весь {{ season.name }}</option>{% for b in brands %}<option value="brand:{{ b }}">{{ b }} {{ season.name }}</option>{% endfor %}{% endif %}</select></label>
+      <button class="btn primary" type="submit">Показать изменения</button>
+    </div>
+    <p class="muted">Порядок: ручная цена позиции › наценка позиции › заказ › бренд + сезон › сезон › бренд › по умолчанию. Отгруженные позиции не пересчитываются.</p>
+  </form>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Клиенты {{ season.name if season else '' }}</h2></div>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Клиент</th><th>Правила</th><th class="num">База</th><th class="num">Сумма</th><th class="num">Предоплата</th><th class="num">Оплачено</th><th></th></tr></thead>
+    <tbody>{% for c in customers %}{% set a = s.customers.get(c.code) if ledger else none %}
+      <tr><td><strong>{{ c.code }}</strong>{{ ' — ' ~ c.name if c.name else '' }}{% if c.aliases %}<br><small class="muted">также: {{ c.aliases|map(attribute='alias')|join(', ') }}</small>{% endif %}</td>
+        <td>{% if c.is_owner %}<span class="chip">вы — цена фабрики</span>{% else %}{% for r in rules if r.customer_id == c.id %}<span class="chip">{{ r.markup|pct }}% · {{ r.order.brand.name if r.order else ((r.brand.name ~ ' ') if r.brand else '') ~ (r.season.name if r.season else ('' if r.brand else 'по умолчанию')) }}</span>{% else %}<span class="muted">нет — как в файле</span>{% endfor %}{% endif %}</td>
+        <td class="num">{{ a.base|money if a else '' }}</td><td class="num"><strong>{{ a.total|money if a else '' }}</strong></td>
+        <td class="num">{{ a.deposit_due|money if a else '' }}</td><td class="num">{{ (a.confirmed_to_factory + a.confirmed_to_owner)|money if a else '' }}</td>
+        <td class="nowrap">{% if not c.is_owner %}<button class="btn sm quiet" type="button" data-set-owner="{{ c.code }}">Это я</button>{% endif %}
+          {% if a and not c.is_owner and season %}<form method="post" action="/documents/generate" style="display:inline"><input type="hidden" name="season" value="{{ season.name }}"><input type="hidden" name="customer" value="{{ c.code }}"><button class="btn sm">Excel + PDF</button></form>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<dialog class="fx-modal" id="fx-preview" aria-labelledby="fx-preview-title">
+  <h2 id="fx-preview-title">Проверьте изменения</h2>
+  <div data-preview-body></div>
+  <div class="form-actions"><button class="btn primary" type="button" data-preview-confirm>Сохранить</button><button class="btn quiet" type="button" data-preview-cancel>Отмена</button></div>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="/static/fx.js?v={{ asset_version() }}" defer></script>{% endblock %}

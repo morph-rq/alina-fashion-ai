@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "alina-fashion-dev",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "scripts/run.sh"
+      ],
+      "env": {
+        "PORT": "8002"
+      },
+      "port": 8002
+    },
+    {
+      "name": "alina-fashion-voice",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "scripts/run.sh"
+      ],
+      "env": {
+        "PORT": "8003",
+        "FASHION_PUBLIC_BASE_URL": "http://127.0.0.1:8003"
+      },
+      "port": 8003
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}История{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>История изменений</h1>
+    <p class="page-sub">Кто, что и когда изменил. Сравните суммы между двумя датами.</p>
+  </div>
+  <div class="page-actions">{{ ui.season_select(seasons, season, label='Сезон', action='/history') }}</div>
+</header>
+<section class="section">
+  <form class="panel fx-row" method="get" action="/history">
+    <input type="hidden" name="season" value="{{ season.name if season else '' }}">
+    <label>С даты <input type="date" name="start" value="{{ start }}"></label>
+    <label>По дату <input type="date" name="end" value="{{ end }}"></label>
+    <button class="btn">Сравнить</button>
+  </form>
+  {% if comparison %}
+  <div class="table-frame"><table class="table">
+    <thead><tr><th></th><th class="num">{{ first.created_at|local('%d.%m.%Y') if first else 'Было' }}</th><th class="num">{{ second.created_at|local('%d.%m.%Y') if second else 'Сейчас' }}</th><th class="num">Разница</th></tr></thead>
+    <tbody>{% for r in comparison %}<tr class="{{ '' if r.delta else 'muted' }}"><td>{{ r.label }}</td><td class="num">{{ r.before|money }}</td><td class="num">{{ r.after|money }}</td><td class="num">{% if r.delta %}<strong>{{ '+' if r.delta > 0 else '' }}{{ r.delta|money }}</strong>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</section>
+<section class="section">
+  <div class="section-head"><h2>Лента</h2><a class="btn sm quiet" href="/audit">Полный журнал</a></div>
+  <ul class="history-list">{% for e in events %}<li><time>{{ e.timestamp|local('%d.%m.%Y %H:%M') }}</time> — {{ e.description }}{% if e.field and e.previous_value is not none %} <small class="muted">({{ e.previous_value }} → {{ e.new_value }})</small>{% endif %} <small class="muted">· {{ e.source_user }}</small></li>{% endfor %}</ul>
+</section>
+{% endblock %}

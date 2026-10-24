@@ -1,8 +1,21 @@
 {% extends "base.html" %}
 {% import "_ui.html" as ui with context %}
-{% block title %}Import a master workbook{% endblock %}
+{% block title %}Import a master workbook</details>
+{% endblock %}
 {% block content %}
 {{ ui.workspace_bar() }}
+<section class="panel">
+<h1>Import an order spreadsheet</h1>
+<p>Open your workbook immediately, edit its cells and choose reusable supplier rules. The season is suggested from the filename and created when you prepare product drafts.</p>
+<form action="/workbooks/upload" method="post" enctype="multipart/form-data" data-once>
+<label>Excel file <input type="file" name="file" accept=".xlsx" required></label>
+
+<button class="btn primary" type="submit">Upload and edit</button>
+</form>
+<p>No AI required. Excel files up to 1 GB are supported. Preview mapped rows before creating product drafts.</p>
+</section>
+
+<details><summary class="btn quiet">Original SS26 master import and history</summary>
 <header class="page-header"><div><h1>Import the original master workbook</h1><p class="page-sub">For the SS26 source layout. Start from an empty base or upload a later supplier version: unchanged rows are skipped, safe changes are applied and changes to Ready or shipped goods are held for review.</p></div></header>
 <div class="notice info"><span class="notice-icon" aria-hidden="true">i</span><div><strong>Editing a file downloaded from this app?</strong><p>Use Edit in Excel instead: it previews every change before saving.</p></div><a class="btn" href="/excel">Edit in Excel</a></div>
 {% if request.query_params.get('result') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Import finished: {{ request.query_params.get('result') }} product rows processed.</strong><p>Review anything listed under Import review and Allocation review below.</p></div></div>{% endif %}
@@ -40,4 +53,5 @@ AFTER: {{ change.new_values or '-' }}</pre></details></article>{% else %}<p clas
 </section>
 
 <section class="panel danger-zone" id="reset-all"><div class="section-head"><div><h2>Remove files, reverse a Ready import or reset</h2><p>Each clean-up action has a different scope; review exactly what it affects before confirming.</p></div><a class="btn" href="/workspace/reset">Choose a clean-up action</a></div></section>
+</details>
 {% endblock %}

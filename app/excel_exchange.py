@@ -334,7 +334,8 @@ def install_excel_exchange(app,templates,context):
 
     @app.get('/excel')
     def hub(request: Request,db=Depends(get_db)):
-        return page(request,db)
+        from app.workbook_workspace import saved_workbooks
+        return page(request,db,workbooks=saved_workbooks())
 
     @app.get('/excel/download')
     def download(blank: bool=False,db=Depends(get_db)):

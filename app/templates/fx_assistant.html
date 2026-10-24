@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Ассистент{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Fashion AI</h1>
+    <p class="page-sub">Ассистент живёт в строке вверху каждой страницы: пишите, говорите или перетащите файл — диалог продолжается, куда бы вы ни перешли. Суммы считает приложение; ничего не сохраняется без вашего «Подтвердить».{% if not ai_connected %} Сейчас работают основные команды без ИИ — подключите Claude в <a href="/settings/ai">Настройках</a>, чтобы говорить как угодно.{% endif %}</p>
+  </div>
+  <div class="page-actions"><a class="btn quiet" href="/settings/voice">Голос</a></div>
+</header>
+<div id="copilot-slot" class="copilot-slot" data-conversation="{{ conversation if c else '' }}"></div>
+{% endblock %}

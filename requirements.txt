@@ -12,3 +12,4 @@ pypdf>=6.0,<7
 httpx>=0.28,<1
 pytest>=9.0,<10
 cryptography>=44,<51
+defusedxml>=0.7,<1

@@ -23,6 +23,7 @@ os.environ.update({
     'FASHION_GOOGLE_CLIENT_SECRET': '',
     'FASHION_RECOVERY_PASSPHRASE': '',
     'FASHION_BACKGROUND_WORKER': '0',
+    'ELEVENLABS_API_KEY': '',
 })
 
 import pytest  # noqa: E402
@@ -42,3 +43,12 @@ def isolate_backup_runtime(tmp_path, monkeypatch):
     monkeypatch.setattr(outbox, 'OUTBOX_DIR', tmp_path/'data'/'outbox')
     monkeypatch.setattr(outbox, 'ENCRYPTED_DIR', tmp_path/'backups'/'recovery'/'encrypted')
     monkeypatch.setattr(source_store, 'ROOT_DIR', tmp_path)
+    # Generated customer/internal documents never land in the workspace's data folder.
+    from app import customer_documents, selective_export
+    monkeypatch.setattr(customer_documents, 'ROOT_DIR', tmp_path)
+    monkeypatch.setattr(selective_export, 'ROOT_DIR', tmp_path)
+    # The assistant's workbook index and dropped files stay in the test's folder too.
+    from app import factory_routes, workbook_inspect
+    monkeypatch.setattr(workbook_inspect, 'CACHE_DIR', tmp_path/'cache'/'inspect')
+    monkeypatch.setattr(workbook_inspect, 'ROOT_DIR', tmp_path)
+    monkeypatch.setattr(factory_routes, 'IMPORT_DIR', tmp_path/'data'/'imports')

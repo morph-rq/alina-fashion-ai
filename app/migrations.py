@@ -28,7 +28,12 @@ from app.config import ROOT_DIR, settings
 
 
 ALTERATIONS: dict[str, dict[str, str]] = {
+    "agent_proposals": {
+        "conversation": "VARCHAR(32)",
+        "version": "INTEGER NOT NULL DEFAULT 1",
+    },
     "customers": {
+        "is_owner": "BOOLEAN NOT NULL DEFAULT 0",
         "country_code": "VARCHAR(2)",
         "phone": "VARCHAR(50)",
         "email": "VARCHAR(200)",
@@ -70,6 +75,10 @@ ALTERATIONS: dict[str, dict[str, str]] = {
         "contact_on_pdf_send": "BOOLEAN NOT NULL DEFAULT 0",
         "split_from_item_id": "INTEGER REFERENCES order_items(id)",
         "revision": "INTEGER NOT NULL DEFAULT 1",
+        "markup_source": "VARCHAR(20) NOT NULL DEFAULT 'import'",
+        "pricing_section": "VARCHAR(60)",
+        "source_cell": "VARCHAR(40)",
+        "cancel_reason": "TEXT",
     },
     "brand_season_rules": {
         "special_cost": "NUMERIC(18, 2) NOT NULL DEFAULT 0",
@@ -81,9 +90,17 @@ ALTERATIONS: dict[str, dict[str, str]] = {
     },
     "factory_payments": {
         "order_id": "INTEGER REFERENCES orders(id)",
+        "currency": "VARCHAR(3) NOT NULL DEFAULT 'EUR'",
+        "reference": "VARCHAR(300)",
+        "factory_account": "VARCHAR(200)",
     },
     "payments": {
         "season_id": "INTEGER REFERENCES seasons(id)",
+        "destination": "VARCHAR(20) NOT NULL DEFAULT 'owner'",
+        "status": "VARCHAR(20) NOT NULL DEFAULT 'confirmed'",
+        "currency": "VARCHAR(3) NOT NULL DEFAULT 'EUR'",
+        "reference": "VARCHAR(300)",
+        "factory_account": "VARCHAR(200)",
     },
     "expenses": {
         "season_id": "INTEGER REFERENCES seasons(id)",

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Заказы{% endblock %}
+{% block content %}
+<span hidden data-fx-ctx='{{ {'season': season.name if season else None, 'brand': f.brand or None, 'customer': f.customer or None, 'status': f.status or None, 'rows_visible': rows|length, 'figures': ([{'label': 'Фабрике всего', 'value': '€ ' ~ ledger.settlement.factory.total|string}, {'label': 'Депозиты клиентов', 'value': '€ ' ~ ledger.settlement.external_deposits_expected|string}, {'label': 'Ваш взнос', 'value': '€ ' ~ ledger.settlement.owner_net_deposit_planned|string}] if ledger else [])}|tojson }}'></span>
+<header class="page-header">
+  <div>
+    <h1>Заказы {{ season.name if season else '' }}</h1>
+    <p class="page-sub">Все бренды, фото, размеры и распределение по клиентам. Нажмите на ячейку, чтобы изменить; итоги пересчитываются сразу.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn primary" href="/factory-import">{{ ui.icon('upload') }}Загрузить файл фабрики</a>
+    {{ ui.season_select(seasons, season, label='Сезон', action='/board') }}
+  </div>
+</header>
+{% if not season %}
+{% call ui.empty('Пока нет заказов', 'Загрузите Excel фабрики — приложение само найдёт товары, фото, размеры и клиентов.') %}<a class="btn primary" href="/factory-import">Загрузить файл</a>{% endcall %}
+{% else %}
+{% set s = ledger.settlement %}
+<div class="figures" style="--cols:4">
+  <a class="figure" href="/factories?season={{ season.name }}"><span class="figure-label">Фабрике всего</span><span class="figure-value">{{ s.factory.total|moneynb }}<span class="unit">€</span></span><span class="figure-sub">база {{ s.factory.base|moneynb }} · предоплата {{ s.factory_deposit_required|moneynb }}</span></a>
+  <a class="figure" href="/pricing?season={{ season.name }}"><span class="figure-label">Депозиты клиентов</span><span class="figure-value">{{ s.external_deposits_expected|moneynb }}<span class="unit">€</span></span><span class="figure-sub">ожидается от клиентов</span></a>
+  <a class="figure {{ 'alert' if s.owner_transfer_now > 0 else '' }}" href="/factories?season={{ season.name }}"><span class="figure-label">Ваш взнос</span><span class="figure-value">{{ (s.owner_net_deposit_planned if s.owner_net_deposit_planned > 0 else 0)|moneynb }}<span class="unit">€</span></span><span class="figure-sub">{% if s.owner_net_deposit_planned < 0 %}клиенты покрывают больше на {{ (-s.owner_net_deposit_planned)|moneynb }}{% else %}предоплата − депозиты клиентов{% endif %}</span></a>
+  <a class="figure {{ 'alert' if reviews else '' }}" href="/board?season={{ season.name }}&amp;customer=%E2%80%94"><span class="figure-label">Нужно уточнить</span><span class="figure-value">{{ reviews }}</span><span class="figure-sub">строк без клиента</span></a>
+</div>
+{% for w in ledger.warnings[:6] %}<div class="notice tone-warn">⚠ {{ w }}</div>{% endfor %}
+
+<form class="filter-bar fx-filters" method="get" action="/board">
+  <input type="hidden" name="season" value="{{ season.name }}">
+  <label>Бренд <select name="brand"><option value="">Все</option>{% for b in brands %}<option {{ 'selected' if f.brand == b else '' }}>{{ b }}</option>{% endfor %}</select></label>
+  <label>Клиент <select name="customer"><option value="">Все</option><option value="—" {{ 'selected' if f.customer == '—' else '' }}>Без клиента</option>{% for c in customers %}<option value="{{ c.code }}" {{ 'selected' if f.customer == c.code else '' }}>{{ c.code }}</option>{% endfor %}</select></label>
+  <label>Статус <select name="status"><option value="">Все</option>{% for st in statuses %}<option value="{{ st }}" {{ 'selected' if f.status == st else '' }}>{{ status_ru[st] }}</option>{% endfor %}</select></label>
+  <label class="fx-grow">Поиск <input type="search" name="q" value="{{ f.q }}" placeholder="название, артикул, размер, AA 40…"></label>
+  <button class="btn">Показать</button>
+  <span class="muted">{{ rows|length }} поз.</span>
+</form>
+
+<div class="fx-bulk" id="fx-bulk" hidden>
+  <strong data-bulk-count>0</strong> выбрано:
+  <select data-bulk-status aria-label="Статус"><option value="">Статус…</option>{% for st in statuses %}<option value="{{ st }}">{{ status_ru[st] }}</option>{% endfor %}</select>
+  <a class="btn sm" href="/assistant" title="Ассистент увидит выделенные строки">Спросить ассистента</a>
+  <select data-bulk-customer aria-label="Клиент"><option value="">Перенести клиенту…</option>{% for c in customers %}<option value="{{ c.code }}">{{ c.code }}</option>{% endfor %}</select>
+  <label>Наценка <input data-bulk-markup size="4" inputmode="decimal" placeholder="35">%</label>
+  <button class="btn sm primary" type="button" data-bulk-apply>Показать изменения</button>
+  <button class="btn sm quiet" type="button" data-bulk-clear>Снять выбор</button>
+</div>
+
+<div class="fx-grid-wrap">
+<table class="fx-grid" id="fx-grid" data-season="{{ season.name }}">
+  <thead><tr>
+    <th class="fx-sticky-col"><input type="checkbox" data-select-all aria-label="Выбрать все"></th>
+    <th class="fx-sticky-col2">Фото</th><th>Изделие</th><th>Бренд</th><th>Цвет</th><th>Размер</th><th class="num">Шт.</th>
+    <th class="num">База €</th><th>Клиент</th><th class="num">Наценка %</th><th class="num">Цена клиента €</th><th class="num">Итого клиента €</th>
+    <th>Статус</th><th>Источник</th>
+  </tr></thead>
+  <tbody>{% for i in rows %}{% set a = amounts[i.id] %}
+    <tr data-item="{{ i.id }}" class="fx-st-{{ i.status|lower|replace(' ', '-') }}{{ ' fx-unclear' if not i.customer_id else '' }}">
+      <td class="fx-sticky-col"><input type="checkbox" data-select value="{{ i.id }}" aria-label="Выбрать"></td>
+      <td class="fx-sticky-col2">{% if i.image_path %}<img class="fx-thumb" loading="lazy" alt="" src="{{ i.image_path|media_url }}">{% endif %}</td>
+      <td><strong>{{ i.name or '—' }}</strong><br><small class="muted">{{ i.article or '' }}</small></td>
+      <td>{{ i.order.brand.name }}</td>
+      <td data-edit="color" data-item="{{ i.id }}" tabindex="0">{{ i.color or '' }}</td>
+      <td data-edit="size" data-item="{{ i.id }}" tabindex="0" class="{{ 'cell-missing' if not i.size else '' }}">{{ i.size or 'добавить' }}</td>
+      <td class="num" data-edit="quantity" data-item="{{ i.id }}" tabindex="0">{{ i.quantity }}</td>
+      <td class="num fx-calc">{{ a.base|moneynb }}</td>
+      <td data-edit="customer" data-item="{{ i.id }}" data-options="{% for c in customers %}{{ c.code }}{{ ',' if not loop.last }}{% endfor %}" tabindex="0">
+        {% if i.customer %}<span class="chip">{{ i.customer.code }}{{ ' · вы' if i.customer.is_owner else '' }}</span>{% else %}<span class="chip tone-warn">кому?</span>{% endif %}
+        {% if i.source_allocation_description %}<br><small class="muted" title="Как в файле фабрики">«{{ i.source_allocation_description }}»</small>{% endif %}</td>
+      <td class="num" data-edit="markup" data-item="{{ i.id }}" tabindex="0">{% if i.customer and i.customer.is_owner %}<span class="muted">фабрика</span>{% else %}{{ i.markup_percentage|pct }}{% if i.markup_source == 'manual' %} ✎{% endif %}{% endif %}</td>
+      <td class="num" data-edit="price" data-item="{{ i.id }}" tabindex="0">{% if i.selling_unit_price is not none %}<strong>{{ i.selling_unit_price|moneynb }}</strong> ✎{% else %}<span class="fx-calc">{{ (a.final / i.quantity if i.quantity else a.final)|moneynb }}</span>{% endif %}</td>
+      <td class="num fx-calc"><strong>{{ a.final|moneynb }}</strong></td>
+      <td data-edit="status" data-item="{{ i.id }}" data-status="{{ i.status }}" data-options="{% for st in statuses %}{{ st }}|{{ status_ru[st] }}{{ ',' if not loop.last }}{% endfor %}" tabindex="0"><span class="fx-status fx-status-{{ i.status|lower|replace(' ', '-') }}">{{ status_ru.get(i.status, i.status) }}</span>{% if i.cancel_reason %}<br><small class="muted">{{ i.cancel_reason }}</small>{% endif %}</td>
+      <td><small class="muted" title="{{ i.source_file or '' }}">{{ i.source_sheet or '' }} {{ i.source_cell or i.source_row or '' }}</small>{% if i.source_fill %} <span class="fx-swatch" style="background:{{ i.source_fill }}" title="Цвет ячейки в файле фабрики"></span>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+</table>
+</div>
+<p class="muted fx-legend"><span class="fx-calc-key"></span> рассчитано автоматически · ✎ задано вручную (правила наценки его не меняют) · Ctrl+Z — отменить последнее изменение · Цвет из файла фабрики показан как подсказка, статус не меняет.</p>
+<p><a class="btn quiet" href="/worksheet">Подробная таблица (группы, дистрибьюторы)</a> <a class="btn quiet" href="/history?season={{ season.name }}">История изменений</a></p>
+{% endif %}
+
+<dialog class="fx-modal" id="fx-preview" aria-labelledby="fx-preview-title">
+  <h2 id="fx-preview-title">Проверьте изменения</h2>
+  <div data-preview-body></div>
+  <div class="form-actions"><button class="btn primary" type="button" data-preview-confirm>Сохранить</button><button class="btn quiet" type="button" data-preview-cancel>Отмена</button></div>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="/static/fx.js?v={{ asset_version() }}" defer></script>{% endblock %}

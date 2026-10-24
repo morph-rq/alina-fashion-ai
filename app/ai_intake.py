@@ -417,13 +417,20 @@ def _spreadsheet_text(filename: str, content: bytes) -> str:
 def _bundle_parts(message: str, attachments: list[tuple[str, str, bytes]]) -> tuple[list[dict[str, Any]], list[str]]:
     if len(attachments) > MAX_ATTACHMENT_COUNT:
         raise ValueError(f"Upload no more than {MAX_ATTACHMENT_COUNT} files at once")
-    if sum(len(content) for _name, _mime, content in attachments) > MAX_TOTAL_ATTACHMENT_BYTES:
-        raise ValueError("Combined attachments exceed 25 MB")
+    from app.source_store import MAX_SPREADSHEET_BYTES
+    def is_workbook(name):
+        return name.lower().endswith((".xlsx", ".xlsm"))
+    # Workbooks are decoded locally; their embedded images are not sent to AI.
+    if sum(len(content) for name, _mime, content in attachments if not is_workbook(name)) > MAX_TOTAL_ATTACHMENT_BYTES:
+        raise ValueError("Combined non-spreadsheet attachments exceed 25 MB")
+    if sum(len(content) for name, _mime, content in attachments if is_workbook(name)) > MAX_SPREADSHEET_BYTES:
+        raise ValueError("Combined Excel workbooks exceed 1 GB; upload one at a time")
     parts: list[dict[str, Any]] = [{"text": "User message:\n" + (message.strip() or "[No typed message]")}]
     names = []
     for filename, supplied_mime, content in attachments:
-        if len(content) > MAX_ATTACHMENT_BYTES:
-            raise ValueError(f"Attachment {filename} exceeds 12 MB")
+        limit = MAX_SPREADSHEET_BYTES if is_workbook(filename) else MAX_ATTACHMENT_BYTES
+        if len(content) > limit:
+            raise ValueError(f"Attachment {filename} exceeds {limit // (1024 * 1024)} MB")
         safe_name = re.sub(r"[^A-Za-z0-9._ -]", "_", filename)[:200] or "attachment"
         names.append(safe_name)
         extension = safe_name.rsplit(".", 1)[-1].casefold() if "." in safe_name else ""

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+from io import BytesIO
 import secrets
 from urllib.parse import quote
 
@@ -17,6 +19,37 @@ from app.models import DraftQuestion, DraftRow, IntakeSession, OperationReceipt,
 
 MAX_UPLOADS = 10
 INLINE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"}
+
+
+def infer_upload_season(uploads: list[UploadFile]) -> str | None:
+    """Prefer explicit season tokens in filenames, then workbook sheet names."""
+    def names(text):
+        return {prefix.upper() + year[-2:] for prefix, year in
+                re.findall(r"(?<![A-Za-z0-9])(SS|FW|AW)[ _-]*(20\d{2}|\d{2})(?!\d)", text, re.I)}
+    found = set()
+    for upload in uploads:
+        found.update(names(upload.filename or ""))
+    if not found:
+        from openpyxl import load_workbook
+        for upload in uploads:
+            if not (upload.filename or "").lower().endswith((".xlsx", ".xlsm")):
+                continue
+            position = upload.file.tell()
+            try:
+                content = upload.file.read(source_store.source_size_limit(upload.filename or "") + 1)
+                if len(content) > source_store.source_size_limit(upload.filename or ""):
+                    continue
+                book = load_workbook(BytesIO(content), read_only=True, data_only=True)
+                try:
+                    for sheet in book.sheetnames:
+                        found.update(names(sheet))
+                finally:
+                    book.close()
+            except Exception:
+                pass  # Capture/analysis provides file validation; never guess a season.
+            finally:
+                upload.file.seek(position)
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _analysis_sources(db: Session, session: IntakeSession, source_ids: list[int]) -> list[tuple[str, str, bytes, int]]:
@@ -138,7 +171,7 @@ def install_intake(app, templates, context):
             raise HTTPException(422, f"Upload at most {MAX_UPLOADS} files at once.")
         ids = []
         for upload in files:
-            content = upload.file.read(source_store.MAX_SOURCE_BYTES + 1)
+            content = upload.file.read(source_store.source_size_limit(upload.filename or "") + 1)
             try:
                 result = source_store.capture(db, channel="upload", content=content, original_name=upload.filename,
                                               media_type=upload.content_type, session_id=session.id,
@@ -156,11 +189,21 @@ def install_intake(app, templates, context):
         return RedirectResponse("/inbox" + (f"?{query}" if query else ""), 303)
 
     @app.post("/intake")
-    def intake_create(background: BackgroundTasks, season_id: int = Form(...), title: str = Form(""), message: str = Form(""),
+    def intake_create(background: BackgroundTasks, season_id: int = Form(0), season_name: str = Form(""), title: str = Form(""), message: str = Form(""),
                       attachments: list[UploadFile] = File(default=[]), db: Session = Depends(get_db)):
-        season = db.get(Season, season_id)
-        if season is None:
-            raise HTTPException(422, "Choose an existing season.")
+        if season_id:
+            season = db.get(Season, season_id)
+            if season is None:
+                raise HTTPException(422, "Choose an existing season.")
+        else:
+            name = season_name.strip().upper() or infer_upload_season(attachments)
+            if not name or len(name) > 40:
+                return RedirectResponse("/inbox?error=" + quote("Could not identify one season. Enter a season name below (for example SS27), reselect your file and upload again."), 303)
+            season = db.scalar(select(Season).where(Season.name == name))
+            if season is None:
+                season = Season(name=name)
+                db.add(season)
+                db.flush()
         session = drafts.new_session(db, season, title.strip() or (message.strip()[:60] or "New intake"))
         _post_message(db, session, message, capture_uploads(db, session, attachments), background)
         return RedirectResponse(f"/intake/{session.public_id}", 303)

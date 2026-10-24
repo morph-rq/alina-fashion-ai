@@ -79,6 +79,10 @@ def save(ref: str, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(f".{secrets.token_hex(4)}.tmp")
     temporary.write_bytes(protect(json.dumps(value).encode("utf-8")))
+    try:
+        os.chmod(temporary, 0o600)
+    except OSError:
+        pass
     os.replace(temporary, path)
 
 

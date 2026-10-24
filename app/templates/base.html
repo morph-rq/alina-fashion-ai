@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="ru" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -22,7 +22,6 @@
       </nav>
       <div class="shell-tools">
         <button class="tool-btn search-btn" type="button" data-search-open aria-haspopup="dialog" aria-label="Search everything (Ctrl K)">{{ ui.icon('search') }}<span>Search</span><kbd>Ctrl K</kbd></button>
-        <button class="tool-btn" type="button" data-open="ai-help" aria-haspopup="dialog" aria-label="AI Help" title="AI Help: the business helper"><span class="ai-glyph" aria-hidden="true">AI</span><span class="tool-label" aria-hidden="true">AI Help</span></button>
         <details class="menu add-menu">
           <summary class="btn primary" aria-haspopup="menu">{{ ui.icon('plus') }}Add</summary>
           <div class="menu-panel" role="menu">{{ ui.add_menu_items() }}</div>
@@ -33,6 +32,8 @@
     </div>
   </header>
 
+  {% include "_copilot.html" %}
+
   <main class="page" id="main" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
@@ -40,14 +41,14 @@
   <footer class="shell-foot"><span>Money is calculated from the rules; every change is recorded.</span><a href="/audit">Audit history</a></footer>
 
   <nav class="tabbar" aria-label="Main">
-    <a href="/" {% if area == 'overview' %}aria-current="page"{% endif %}>{{ ui.icon('overview') }}<span>Overview</span></a>
-    <a href="/worksheet" data-workspace-link {% if area == 'workspace' %}aria-current="page"{% endif %}>{{ ui.icon('workspace') }}<span>Workspace</span></a>
+    <a href="/" {% if area == 'overview' %}aria-current="page"{% endif %}>{{ ui.icon('overview') }}<span>Обзор</span></a>
+    <a href="/board" data-workspace-link {% if area == 'workspace' %}aria-current="page"{% endif %}>{{ ui.icon('workspace') }}<span>Заказы</span></a>
     <details class="menu tab-add">
       <summary aria-label="Add"><span class="plus">{{ ui.icon('plus') }}</span><span>Add</span></summary>
       <div class="menu-panel" role="menu">{{ ui.add_menu_items() }}</div>
     </details>
-    <a href="/inbox" {% if area == 'inbox' %}aria-current="page"{% endif %}>{{ ui.icon('inbox') }}<span>Inbox</span></a>
-    <a href="/customers" {% if area == 'customers' %}aria-current="page"{% endif %}>{{ ui.icon('customers') }}<span>Customers</span></a>
+    <a href="/factories" {% if area == 'factories' %}aria-current="page"{% endif %}>{{ ui.icon('money') }}<span>Фабрики</span></a>
+    <a href="/assistant" {% if area == 'assistant' %}aria-current="page"{% endif %}>{{ ui.icon('inbox') }}<span>Ассистент</span></a>
   </nav>
 
   <dialog class="search-dialog" id="search-dialog" aria-label="Search everything">
@@ -56,15 +57,10 @@
     <div class="search-foot"><span>Type at least 2 characters, then use ↓ to move through results.</span><a href="/exports/business.xlsx">Download all data as Excel</a></div>
   </dialog>
 
-  <dialog class="drawer" id="ai-help" aria-labelledby="ai-help-title">
-    <div class="drawer-head"><div class="person-head"><span class="ai-spark" aria-hidden="true">AI</span><div><h2 id="ai-help-title">AI Help</h2><p>Ask where something is, what your projected profit is, or propose a formula change.</p></div></div><button class="icon-btn" type="button" data-close aria-label="Close AI Help">×</button></div>
-    <div class="drawer-body"><div class="ai-messages" id="ai-help-messages" aria-live="polite"><div class="assistant-bubble">Ask in everyday language. A formula change stays a proposal until you apply it yourself.</div></div></div>
-    <div class="ai-prompts"><button type="button" data-ai-prompt>What should I do next?</button><button type="button" data-ai-prompt>What is my projected profit?</button><button type="button" data-ai-prompt>How do I add an order?</button></div>
-    <div class="drawer-foot"><form class="ai-form" id="ai-help-form"><label class="sr-only" for="ai-help-question">Ask AI Help</label><textarea id="ai-help-question" rows="2" placeholder="Ask anything about the business…" required></textarea><button class="btn primary" type="submit">Ask</button></form></div>
-  </dialog>
 
   <script src="/static/app.js?v={{ asset_version() }}" defer></script>
   <script src="/static/tour.js?v={{ asset_version() }}" defer></script>
+  <script src="/static/copilot.js?v={{ asset_version() }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

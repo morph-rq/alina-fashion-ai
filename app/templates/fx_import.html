@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Загрузка файлов фабрик{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Загрузить файлы фабрик</h1>
+    <p class="page-sub">Excel (.xlsx, .xlsm, .xls) до 1 ГБ и PDF. Оригинал сохраняется без изменений; в учёт ничего не попадёт, пока вы не проверите и не подтвердите.</p>
+  </div>
+</header>
+
+<form class="fx-drop" id="fx-upload" method="post" action="/factory-import" enctype="multipart/form-data">
+  <input id="fx-files" type="file" name="files" multiple accept=".xlsx,.xlsm,.xls,.pdf" class="sr-only-input">
+  <label for="fx-files" class="fx-drop-zone" data-drop>
+    <span class="drop-icon">{{ ui.icon('upload') }}</span>
+    <strong>Перетащите файлы сюда или нажмите, чтобы выбрать</strong>
+    <span class="muted">Можно несколько файлов сразу. Макросы в .xlsm не запускаются.</span>
+  </label>
+  <div class="fx-row">
+    <label>Сезон (если не указан в названии) <input name="season" placeholder="SS27" maxlength="10" list="fx-seasons"></label>
+    <datalist id="fx-seasons">{% for s in seasons %}<option value="{{ s.name }}">{% endfor %}</datalist>
+    <button class="btn primary" type="submit">Загрузить и проверить</button>
+  </div>
+  <div class="fx-progress" id="fx-upload-progress" hidden><div class="fx-bar"><span></span></div><p class="muted"></p></div>
+</form>
+
+{% if jobs %}
+<section class="section">
+  <div class="section-head"><h2>Последние загрузки</h2></div>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Файл</th><th>Состояние</th><th class="num">Строк</th><th class="num">Уточнить</th><th></th></tr></thead>
+    <tbody>{% for job in jobs %}
+      <tr data-job="{{ job.token }}" data-state="{{ job.state }}">
+        <td>{{ job.filename }}<br><small class="muted">{{ (job.size or 0) // 1048576 }} МБ</small></td>
+        <td><span class="status-pill tone-{{ {'ready':'ok','committed':'ok','failed':'danger','cancelled':'neutral','reference':'info'}.get(job.state, 'warn') }}" data-job-state>{{ job.message }}</span></td>
+        <td class="num">{{ job.items or '' }}</td><td class="num">{{ job.unclear or '' }}</td>
+        <td class="nowrap">{% if job.state in ['ready', 'reference', 'analysing', 'queued'] %}<a class="btn sm {{ 'primary' if job.state == 'ready' else '' }}" href="/factory-import/{{ job.token }}">{{ 'Проверить' if job.state == 'ready' else 'Открыть' }}</a>{% endif %}
+          {% if job.state in ['queued', 'analysing', 'ready'] %}<form method="post" action="/factory-import/{{ job.token }}/cancel" style="display:inline"><button class="btn sm quiet">Отменить</button></form>{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+
+{% if batches %}
+<section class="section">
+  <div class="section-head"><h2>Сохранённые оригиналы</h2><a class="btn sm" href="/documents">Все документы</a></div>
+  <ul class="file-list">{% for b in batches %}<li>{{ ui.icon('file') }} {% if b.stored_path %}<a href="/originals/{{ b.id }}">{{ b.filename }}</a>{% else %}{{ b.filename }}{% endif %} <small class="muted">{{ b.imported_at|local('%d.%m.%Y %H:%M') }}</small></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/fx.js?v={{ asset_version() }}" defer></script>{% endblock %}

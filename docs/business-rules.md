@@ -138,3 +138,9 @@ Data migrations are versioned (`schema_migrations`) and run once. The historical
 removes an existing customer assignment and skips rows with a resolved allocation note; it only allocates
 rows that are still unallocated with one unambiguous parsed customer, and opens notes for ambiguous ones.
 Run `scripts/migration_check.py <database>` against a copy before upgrading a workspace.
+
+## Factory agreements, customer pricing and the assistant
+
+Factory and customer percentages are independent; settlement, deposits, the preview → confirm rule, exact
+selection, customer-isolated exports and voice confirmation rules are described in
+[factory-and-voice-assistant.md](factory-and-voice-assistant.md).

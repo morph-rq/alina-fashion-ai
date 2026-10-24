@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Документы{% endblock %}
+{% block content %}
+<span hidden data-fx-ctx='{{ {'season': season.name if season else None, 'documents_listed': generated|length}|tojson }}'></span>
+<header class="page-header">
+  <div>
+    <h1>Документы</h1>
+    <p class="page-sub">Оригиналы фабрик хранятся без изменений. Документы клиентов — Excel и PDF из одних и тех же данных; выданные версии никогда не перезаписываются.</p>
+  </div>
+  <div class="page-actions"><a class="btn primary" href="/factory-import">{{ ui.icon('upload') }}Загрузить файл</a><a class="btn quiet" href="/inbox">Входящие</a></div>
+</header>
+{% if request.query_params.get('error') %}<div class="notice tone-danger">{{ request.query_params.get('error') }}</div>{% endif %}
+
+<section class="section">
+  <div class="section-head"><h2>Подготовить документы клиенту</h2></div>
+  <form class="panel" method="post" action="/documents/generate">
+    <div class="fx-row">
+      <label>Сезон <select name="season">{% for s in seasons %}<option {{ 'selected' if season and s.id == season.id else '' }}>{{ s.name }}</option>{% endfor %}</select></label>
+      <label>Клиент <select name="customer" multiple size="4">{% for c in customers %}<option value="{{ c.code }}">{{ c.code }}{{ ' — ' ~ c.name if c.name else '' }}</option>{% endfor %}</select></label>
+      <label>Бренды (необязательно) <select name="brands" multiple size="4">{% for b in brands %}<option>{{ b }}</option>{% endfor %}</select></label>
+      <label class="check-line"><input type="checkbox" name="all"> всем клиентам сезона</label>
+      <button class="btn primary" type="submit">Сформировать предпросмотр</button>
+    </div>
+    <p class="muted">В документ входят только позиции этого клиента: фото, артикул, цвет, размер, количество, цены, предоплата и оплаты. Не входят: другие клиенты, проценты и суммы фабрики, ваша маржа, служебные заметки. Каждый файл проверяется на это перед сохранением.</p>
+  </form>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Документы клиентов</h2></div>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Клиент</th><th>Сезон</th><th>Версия</th><th>Создан</th><th>Состояние</th><th>Файл</th><th></th></tr></thead>
+    <tbody>{% for d in generated %}{% set old = outdated[(d.customer_id, d.season_id, d.brand_filter, d.version)] %}
+      <tr><td>{{ d.customer.code if d.customer else {'internal': 'Внутренний отчёт', 'original': 'Оригинал с ценами'}.get(d.kind, '—') }}{% if d.brand_filter %}<br><small class="muted">{{ d.brand_filter }}</small>{% endif %}</td><td>{{ d.season.name if d.season else '' }}</td><td>v{{ d.version }}</td>
+        <td>{{ d.created_at|local('%d.%m.%Y %H:%M') }}</td>
+        <td>{% if d.status == 'issued' %}<span class="status-pill tone-ok">выдан {{ d.issued_at|local('%d.%m') if d.issued_at else '' }}</span>{% else %}<span class="status-pill tone-info">предпросмотр</span>{% endif %}
+          {% if old %}<span class="status-pill tone-warn" title="Данные изменились после создания">устарел</span>{% endif %}</td>
+        <td><a href="/documents/{{ d.id }}/download">{{ ui.icon('download') }} {{ d.file_format|upper }}</a></td>
+        <td>{% if d.kind != 'customer' %}{% elif d.status != 'issued' and not old and d.file_format == 'xlsx' %}<form method="post" action="/documents/{{ d.id }}/issue"><button class="btn sm">Утвердить версию</button></form>{% elif old and d.file_format == 'xlsx' %}<form method="post" action="/documents/generate"><input type="hidden" name="season" value="{{ d.season.name }}"><input type="hidden" name="customer" value="{{ d.customer.code }}">{% for b in (d.brand_filter or '').split(', ') if b %}<input type="hidden" name="brands" value="{{ b }}">{% endfor %}<button class="btn sm primary">Обновить</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="7" class="muted">Документов пока нет.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="muted">Приложение ничего не отправляет клиентам само: скачайте файл и отправьте сами.</p>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Оригиналы фабрик</h2></div>
+  <ul class="file-list">{% for b in batches %}<li>{{ ui.icon('file') }} {% if b.stored_path %}<a href="/originals/{{ b.id }}">{{ b.filename }}</a>{% else %}{{ b.filename }}{% endif %} <small class="muted">{{ b.imported_at|local('%d.%m.%Y %H:%M') }}</small></li>{% else %}<li class="muted">Пока нет.</li>{% endfor %}</ul>
+  <p><a class="btn quiet" href="/workbooks">Редактор исходных таблиц (изменить и скачать изменённый оригинал)</a></p>
+</section>
+{% endblock %}

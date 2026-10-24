@@ -2,6 +2,7 @@
 {% import "_ui.html" as ui with context %}
 {% block title %}{{ statement.customer.name or statement.customer.code }}{% endblock %}
 {% block content %}
+<span hidden data-fx-ctx='{{ {'customer': statement.customer.code if statement and statement.customer else None}|tojson }}'></span>
 {% set c = statement.customer %}
 {% set sname = statement.season.name %}
 {% set sq = '?season=' ~ (sname|urlencode) %}

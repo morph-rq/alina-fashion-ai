@@ -29,6 +29,12 @@ from app.models import SourceBlob, SourceItem
 
 SOURCE_ROOT_RELATIVE = "data/sources"
 MAX_SOURCE_BYTES = 25 * 1024 * 1024
+MAX_SPREADSHEET_BYTES = 1024 * 1024 * 1024   # supplier workbooks with many photos
+
+
+def source_size_limit(filename: str) -> int:
+    return MAX_SPREADSHEET_BYTES if Path(filename).suffix.lower() in {".xlsx", ".xlsm"} else MAX_SOURCE_BYTES
+
 INBOX_STATES = ("captured", "queued", "analysing", "needs_answers", "ready_for_review", "applied", "failed", "ignored")
 _SIGNATURES = [
     (b"%PDF-", "application/pdf"),
@@ -128,8 +134,8 @@ def capture(db: Session, *, channel: str, content: bytes | None, original_name: 
     blob = None
     reused = False
     if content is not None:
-        if len(content) > MAX_SOURCE_BYTES:
-            raise CaptureError(f"{original_name or 'Attachment'} is larger than {MAX_SOURCE_BYTES // (1024 * 1024)} MB.")
+        if len(content) > source_size_limit(original_name):
+            raise CaptureError(f"{original_name or 'Attachment'} is larger than {source_size_limit(original_name) // (1024 * 1024)} MB.")
         detected = sniff_media_type(content, media_type, original_name)
         digest, relative = _store_bytes(content, root)
         blob = db.scalar(select(SourceBlob).where(SourceBlob.sha256 == digest))
@@ -180,8 +186,8 @@ def set_state(item: SourceItem, state: str, reason: str | None = None) -> None:
 
 def attach_content(db: Session, item: SourceItem, content: bytes, media_type: str | None = None, root: Path | None = None) -> SourceItem:
     """Store bytes for an inbox item that was recorded without content (a failed download)."""
-    if len(content) > MAX_SOURCE_BYTES:
-        raise CaptureError(f"{item.original_name or 'Item'} is larger than {MAX_SOURCE_BYTES // (1024 * 1024)} MB.")
+    if len(content) > source_size_limit(item.original_name):
+        raise CaptureError(f"{item.original_name or 'Item'} is larger than {source_size_limit(item.original_name) // (1024 * 1024)} MB.")
     detected = sniff_media_type(content, media_type or item.media_type, item.original_name)
     digest, relative = _store_bytes(content, root)
     blob = db.scalar(select(SourceBlob).where(SourceBlob.sha256 == digest))

@@ -42,14 +42,24 @@ GOLD = colors.HexColor("#AA8957")
 WHITE = colors.white
 
 
+# Fonts with Cyrillic glyphs (Helvetica has none, so Russian names would print as boxes).
+FONT_CANDIDATES = (
+    ("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+    ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+    ("/Library/Fonts/Arial.ttf", "/Library/Fonts/Arial Bold.ttf"),
+    ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    ("/usr/share/fonts/dejavu/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
+)
+
+
 def register_fonts() -> tuple[str, str]:
-    regular = Path("C:/Windows/Fonts/arial.ttf")
-    bold = Path("C:/Windows/Fonts/arialbd.ttf")
-    if regular.exists() and bold.exists():
-        if "FashionSans" not in pdfmetrics.getRegisteredFontNames():
-            pdfmetrics.registerFont(TTFont("FashionSans", regular))
-            pdfmetrics.registerFont(TTFont("FashionSans-Bold", bold))
-        return "FashionSans", "FashionSans-Bold"
+    for regular_path, bold_path in FONT_CANDIDATES:
+        regular, bold = Path(regular_path), Path(bold_path)
+        if regular.exists() and bold.exists():
+            if "FashionSans" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("FashionSans", regular))
+                pdfmetrics.registerFont(TTFont("FashionSans-Bold", bold))
+            return "FashionSans", "FashionSans-Bold"
     return "Helvetica", "Helvetica-Bold"
 
 

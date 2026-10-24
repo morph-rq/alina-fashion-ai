@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Проверка импорта{% endblock %}
+{% block content %}
+<span hidden data-fx-ctx='{{ {'import_token': token, 'workbook': {'source': 'import:' ~ token, 'file': status.filename, 'sheet': None}, 'season': (analysis.season if analysis else None)}|tojson }}'></span>
+<header class="page-header">
+  <div>
+    <h1>{{ status.filename or 'Файл фабрики' }}</h1>
+    <p class="page-sub" data-job-message>{{ status.message }}</p>
+  </div>
+  <div class="page-actions"><a class="btn quiet" href="/factory-import">Все загрузки</a></div>
+</header>
+
+{% if status.state in ['queued', 'analysing'] %}
+<div class="fx-progress" data-poll="{{ token }}"><div class="fx-bar"><span style="width:{{ ((status.progress or 0) * 100)|int }}%"></span></div><p class="muted">Читаю листы, фото и формулы… Большие файлы — до пары минут. Страница обновится сама.</p></div>
+<form method="post" action="/factory-import/{{ token }}/cancel"><button class="btn quiet">Отменить</button></form>
+{% elif status.state == 'reference' %}
+<div class="notice">PDF сохранён как справочный документ ({{ status.pages }} стр.). Суммы из PDF не переносятся автоматически — сверяйте их с таблицей.</div>
+<details class="section"><summary>Текст первых страниц</summary><pre class="fx-pre">{{ status.text }}</pre></details>
+{% elif status.state == 'failed' or status.state == 'cancelled' %}
+<div class="notice tone-danger">{{ status.message }}</div>
+{% elif status.state == 'committed' %}
+<div class="notice tone-ok">Сохранено. <a href="/board">Открыть заказы</a></div>
+{% elif analysis %}
+{% set order_sheets = analysis.sheets|selectattr('kind', 'equalto', 'order')|list %}
+<form method="post" action="/factory-import/{{ token }}/commit" class="fx-review">
+  <div class="figures" style="--cols:4">
+    <div class="figure"><span class="figure-label">Сезон</span><span class="figure-value"><input class="fx-big-input" name="season" value="{{ analysis.season or '' }}" required maxlength="10" aria-label="Сезон"></span><span class="figure-sub">определён по названию файла</span></div>
+    <div class="figure"><span class="figure-label">Бренды</span><span class="figure-value">{{ order_sheets|length }}</span><span class="figure-sub">{{ analysis.sheets|length - order_sheets|length }} других листов</span></div>
+    <div class="figure"><span class="figure-label">Позиции</span><span class="figure-value">{{ analysis.items|length }}</span><span class="figure-sub">{{ analysis.items|selectattr('image_part')|list|length }} с фото</span></div>
+    {% set unclear = analysis.items|rejectattr('confident')|list %}
+    <div class="figure {{ 'alert' if unclear else '' }}"><span class="figure-label">Нужно уточнить</span><span class="figure-value">{{ unclear|length }}</span><span class="figure-sub">ниже, жёлтым</span></div>
+  </div>
+
+  {% for w in analysis.warnings %}<div class="notice tone-warn">⚠ {{ w }} Файл фабрики не исправляется автоматически — сверьте строки.</div>{% endfor %}
+
+  {% if new_tokens %}
+  <section class="section">
+    <div class="section-head"><h2>Новые инициалы в файле</h2></div>
+    <p class="muted">Кто это? Выберите существующего клиента или создайте нового. Например, «AL» может быть Алиной.</p>
+    <div class="fx-token-grid">{% for t in new_tokens %}
+      <label class="fx-token"><strong>{{ t }}</strong> <small class="muted">{{ analysis.tokens[t] }} шт.</small>
+        <select name="map:{{ t }}">
+          <option value="new">Новый клиент «{{ t }}»</option>
+          {% for c in customers %}<option value="{{ c.code }}">Это {{ c.code }}{{ ' — ' ~ c.name if c.name else '' }}</option>{% endfor %}
+          <option value="skip">Не клиент (пропустить)</option>
+        </select></label>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="section">
+    <div class="section-head"><h2>Кто владелец (вы)?</h2></div>
+    <p class="muted">Ваши позиции идут по цене фабрики, а ваш взнос — это то, что фабрике не покрыли депозиты клиентов.</p>
+    <select name="owner"><option value="">{{ owner.code if owner else '— не выбрано —' }}</option>{% for c in customers %}<option value="{{ c.code }}" {{ 'selected' if owner and owner.id == c.id else '' }}>{{ c.code }}{{ ' — ' ~ c.name if c.name else '' }}</option>{% endfor %}{% for t in new_tokens %}<option value="{{ t }}">{{ t }} (новый)</option>{% endfor %}</select>
+  </section>
+
+  {% for sheet in order_sheets %}
+  <section class="section fx-sheet">
+    <div class="section-head">
+      <h2><input class="fx-inline-input" name="brand:{{ sheet.name }}" value="{{ sheet.brand }}" aria-label="Бренд листа {{ sheet.name }}"> <small class="muted">лист «{{ sheet.name }}»</small></h2>
+      <label class="check-line"><input type="checkbox" name="skip:{{ sheet.name }}"> не импортировать</label>
+    </div>
+    <div class="fx-terms">
+      <strong>Условия фабрики:</strong>
+      {% for x in sheet.sections %}<label>{{ x.label }}{% if x.share %} ({{ x.share|pct }}% суммы){% endif %}
+        <input name="rate:{{ sheet.name }}:{{ loop.index0 }}" value="{{ x.rate|pct }}" size="5" inputmode="decimal">%</label>
+        <small class="muted" title="{{ x.evidence }}">{{ x.evidence }}{% if x.rounding == 'euro_up' %} · округление вверх до евро{% endif %}</small>{% else %}
+        <label>процент не найден в листе — укажите: <input name="rate:{{ sheet.name }}:0" size="5" inputmode="decimal" placeholder="30">%</label>{% endfor %}
+      <span class="muted">· база по строкам €{{ sheet.computed_base }}{% if sheet.source_grand_total %} · итог в файле €{{ sheet.source_grand_total }}{% endif %}</span>
+    </div>
+    {% for n in sheet.notes %}<p class="muted fx-note">{{ n }}</p>{% endfor %}
+    <div class="table-frame"><table class="table fx-items">
+      <thead><tr><th>Фото</th><th>Изделие</th><th>Размеры</th><th class="num">Шт.</th><th class="num">Цена</th><th>В файле</th><th>Кому</th></tr></thead>
+      <tbody>{% for item in sheet.items %}
+        <tr class="{{ '' if item.confident else 'fx-unclear' }}{{ ' fx-cancelled' if item.status_hint == 'Cancelled' else '' }}">
+          <td>{% if item.image_part %}<img class="fx-thumb" loading="lazy" alt="" src="/factory-import/{{ token }}/image?part={{ item.image_part|urlencode }}">{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td><strong>{{ item.name or '—' }}</strong><br><small class="muted">{{ item.article or '' }} {{ item.color or '' }} · {{ item.extra.cell }}{% if item.status_hint %} · {{ item.status_hint }}{% endif %}</small></td>
+          <td>{{ item.sizes|join(', ') }}</td><td class="num">{{ item.quantity }}</td><td class="num">{{ item.unit_price or '—' }}</td>
+          <td><code>{{ item.allocation_text or '—' }}</code></td>
+          <td>{% if item.confident %}{% for u in item.units %}<span class="chip">{{ u.customer }}{% if u.size %} · {{ u.size }}{% endif %}</span>{% endfor %}
+            {% else %}<p class="fx-question">{{ item.issue }}. Кому относится каждая штука?</p>
+              {% for u in item.units %}<div class="fx-unit"><select name="alloc:{{ sheet.name }}:{{ item.row }}:{{ loop.index0 }}" aria-label="Клиент для штуки {{ loop.index }}">
+                <option value="">— позже —</option>{% for c in customers %}<option value="{{ c.code }}">{{ c.code }}</option>{% endfor %}{% for t in new_tokens %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+                <input name="size:{{ sheet.name }}:{{ item.row }}:{{ loop.index0 }}" value="{{ u.size or '' }}" size="5" placeholder="размер" aria-label="Размер"></div>{% endfor %}
+            {% endif %}</td>
+        </tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+  {% endfor %}
+
+  {% if analysis.payments %}
+  <section class="section">
+    <div class="section-head"><h2>Оплаты, найденные на сводном листе</h2></div>
+    <p class="muted">Импортируются только отмеченные — как подтверждённые оплаты фабрике. Укажите, кто платил.</p>
+    <div class="table-frame"><table class="table"><thead><tr><th></th><th>Строка</th><th>Дата</th><th class="num">Сумма</th><th>Кто платил</th></tr></thead><tbody>
+    {% for p in analysis.payments %}<tr><td><input type="checkbox" name="pay:{{ loop.index0 }}" aria-label="Импортировать оплату"></td><td>{{ p.label }}</td><td>{{ p.date or '—' }}</td><td class="num">{{ p.amount }}</td>
+      <td><select name="payer:{{ loop.index0 }}"><option value="">—</option>{% for c in customers %}<option value="{{ c.code }}" {{ 'selected' if p.payer and p.payer.upper() == c.code.upper() else '' }}>{{ c.code }}</option>{% endfor %}</select> <small class="muted">{{ p.payer or '' }}</small></td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+  {% endif %}
+
+  <div class="fx-sticky-actions">
+    <label class="check-line"><input type="checkbox" name="rates_confirmed"> Проценты фабрики проверены (наценка: база × (1 + %))</label>
+    <button class="btn primary" type="submit">Сохранить в учёт</button>
+    <span class="muted">Неуточнённые строки сохранятся без клиента и останутся на проверке.</span>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/fx.js?v={{ asset_version() }}" defer></script>{% endblock %}

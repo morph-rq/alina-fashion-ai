@@ -53,6 +53,10 @@ computer, host it as described in [DEPLOYMENT.md](DEPLOYMENT.md) and set a login
 
 ## Start here (testing copy, updated 2026-10-24)
 
+- **Factory orders and the voice assistant** (Russian): upload factory Excel/PDF at `/factory-import`, work in
+  Заказы / Фабрики / Клиенты / Документы, and talk to **Ассистент** (`/assistant`) by voice or text. Connect voice
+  at **Настройки › Голос** (`/settings/voice`, ElevenLabs key). Formulas, selection, exports, voice and Mac setup:
+  [docs/factory-and-voice-assistant.md](docs/factory-and-voice-assistant.md).
 - **New to the app?** Press **Guide** (the **?** at the top) or **Take the 2-minute tour** on Overview: 15 short
   steps that highlight each part and move between pages by themselves. Any address with `?tour=1` starts it too.
 - **Demo with made-up data:** `scripts/ui_preview.py` (add `--port 8002` when the real app already uses 8001).

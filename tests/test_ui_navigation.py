@@ -1,4 +1,4 @@
-"""The simplified navigation: four areas, combined Workspace pages, old URLs and safe return links."""
+"""Navigation: the owner-workflow areas, combined Workspace pages, old URLs and safe return links."""
 from __future__ import annotations
 
 from datetime import date
@@ -78,14 +78,14 @@ def location(response) -> tuple[str, dict[str, list[str]], str]:
     return parts.path, parse_qs(parts.query), parts.fragment
 
 
-def test_shell_offers_four_areas_and_settings_without_more_tools(nav_client: TestClient) -> None:
+def test_shell_offers_the_owner_workflow_areas_and_settings(nav_client: TestClient) -> None:
     page = nav_client.get("/")
     assert page.status_code == 200
     nav = page.text.split('class="shell-nav"', 1)[1].split("</nav>", 1)[0]
-    for href in ('href="/"', 'href="/worksheet"', 'href="/inbox"', 'href="/customers"'):
+    for href in ('href="/"', 'href="/board"', 'href="/factories"', 'href="/pricing"', 'href="/documents"', 'href="/assistant"'):
         assert href in nav
-    assert nav.count("<a ") == 4
-    assert 'href="/settings"' in page.text and "data-search-open" in page.text and 'id="ai-help"' in page.text
+    assert nav.count("<a ") == 6
+    assert 'href="/settings"' in page.text and "data-search-open" in page.text and 'id="copilot"' in page.text
     assert "More tools" not in page.text
 
 

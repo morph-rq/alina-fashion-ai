@@ -7,8 +7,19 @@
   <p class="page-sub" style="margin:0"><span class="state state-{{ session.state }}">{{ session.state.replace('_', ' ') }}</span> {{ session.season.name if session.season else 'No season' }} · saved automatically{% if session.state_reason %} · {{ session.state_reason }}{% endif %}</p></div>
   <div class="btn-row"><a class="btn" href="/inbox">Back to Inbox</a></div>
 </div>
+{% if session.state_reason and session.state != 'analysing' %}
+<div class="notice danger" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div>
+<strong>Your file is saved, but automatic extraction did not finish.</strong>
+<p>{{ session.state_reason }}</p>
+{% if not views %}<p>No editable product rows were created. Retry analysis or add a product row below; your original file is preserved under Evidence.</p>{% endif %}
+<form action="/intake/{{ session.public_id }}/retry" method="post"><button class="btn primary">Retry analysis</button> <a class="btn" href="#draft">Edit draft / add rows</a></form>
+</div></div>
+{% endif %}
 {% if error %}<div class="notice error" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
 {% if session.state == 'analysing' %}<noscript><meta http-equiv="refresh" content="5"></noscript><div class="notice info" role="status" data-auto-refresh><span class="notice-icon" aria-hidden="true">i</span><div><strong>Analysing your sources…</strong><p>Your files are already stored. This page refreshes itself while you are not typing.</p></div></div>{% endif %}
+{% for source in session.sources %}{% if source.original_name.lower().endswith('.xlsx') %}{% if loop.first %}{% endif %}
+<form action="/intake/{{ session.public_id }}/workbook" method="post" style="margin:12px 0" data-once><button class="btn primary">Open saved Excel in worksheet editor</button><span> Read cells, edit directly or ask Claude. No re-upload needed.</span></form>
+{% endif %}{% endfor %}
 <nav class="intake-tabs" aria-label="Intake sections"><a href="#conversation">Talk</a><a href="#draft">Draft</a><a href="#evidence">Evidence</a><a href="#review">Save</a></nav>
 <div class="intake-grid">
   <section class="intake-pane" id="conversation" aria-label="Conversation">

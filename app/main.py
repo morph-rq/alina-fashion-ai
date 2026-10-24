@@ -2325,3 +2325,12 @@ from app.ai_settings import install_ai_settings
 install_ai_settings(app, templates, context)
 # Register background job handlers and schedulers.
 from app import outbox as _outbox, sync as _sync  # noqa: E402,F401
+
+from app.workbook_workspace import install_workbooks
+install_workbooks(app, templates, context)
+from app.factory_routes import install_factory  # noqa: E402
+install_factory(app, templates, context)
+from app.voice import install_voice  # noqa: E402
+install_voice(app, templates, context, get_db)
+from app.copilot import install_copilot  # noqa: E402
+install_copilot(app, templates, context, get_db)

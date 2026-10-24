@@ -48,6 +48,9 @@ class Customer(Base):
     postal_code: Mapped[str | None] = mapped_column(String(30))
     preferred_contact: Mapped[str | None] = mapped_column(String(50))
     notes: Mapped[str | None] = mapped_column(Text)
+    # The business owner: her own allocations cost her the factory price, and her deposit is
+    # whatever the factory still needs after external customers' deposits.
+    is_owner: Mapped[bool] = mapped_column(Boolean, default=False)
     order_items: Mapped[list[OrderItem]] = relationship(back_populates="customer")
     payments: Mapped[list[Payment]] = relationship(back_populates="customer")
     aliases: Mapped[list[CustomerAlias]] = relationship(back_populates="customer", cascade="all, delete-orphan")
@@ -232,6 +235,13 @@ class OrderItem(Base):
     split_from_item_id: Mapped[int | None] = mapped_column(ForeignKey("order_items.id"), index=True)
     # Optimistic-concurrency revision; SQLAlchemy increments it on every update.
     revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # Where the applied markup came from: "rule" (customer pricing rules may reprice it),
+    # "manual" (an agreed per-item markup or price; rules never overwrite it) or "import".
+    markup_source: Mapped[str] = mapped_column(String(20), default="import")
+    # Factory-agreement section (e.g. "RTW", "BAGS") for agreements priced per section.
+    pricing_section: Mapped[str | None] = mapped_column(String(60))
+    source_cell: Mapped[str | None] = mapped_column(String(40))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
     __mapper_args__ = {"version_id_col": revision}
     order: Mapped[Order] = relationship(back_populates="items")
     purchase_group: Mapped[PurchaseGroup | None] = relationship(back_populates="items")
@@ -260,6 +270,14 @@ class Payment(Base):
     amount: Mapped[Decimal] = mapped_column(MONEY)
     type: Mapped[str] = mapped_column(String(50), default="payment")
     note: Mapped[str | None] = mapped_column(Text)
+    # "owner": the customer paid the owner. "factory": paid straight to the factory (counts
+    # once, toward the factory invoice; never also entered as a FactoryPayment).
+    destination: Mapped[str] = mapped_column(String(20), default="owner")
+    # "confirmed" money counts; "expected" is a promise and is never counted as paid.
+    status: Mapped[str] = mapped_column(String(20), default="confirmed")
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    reference: Mapped[str | None] = mapped_column(String(300))
+    factory_account: Mapped[str | None] = mapped_column(String(200))
     season: Mapped[Season | None] = relationship()
     customer: Mapped[Customer | None] = relationship(back_populates="payments")
     order: Mapped[Order | None] = relationship(back_populates="payments")
@@ -289,6 +307,9 @@ class FactoryPayment(Base):
     amount: Mapped[Decimal] = mapped_column(MONEY)
     stage: Mapped[str] = mapped_column(String(30))
     note: Mapped[str | None] = mapped_column(Text)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    reference: Mapped[str | None] = mapped_column(String(300))
+    factory_account: Mapped[str | None] = mapped_column(String(200))
     season: Mapped[Season] = relationship()
     order: Mapped[Order | None] = relationship(back_populates="factory_payments")
     ready_batch: Mapped[ReadyBatch | None] = relationship()
@@ -698,3 +719,133 @@ class CustomTableRow(Base):
 
 
 ModelDict = dict[str, Any]
+
+
+class FactoryAgreement(Base):
+    """The factory's commercial terms for one brand order (independent of customer rates)."""
+    __tablename__ = "factory_agreements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True, index=True)
+    deposit_rate: Mapped[Decimal] = mapped_column(PERCENTAGE, default=Decimal("0.50"))
+    # How the percentage is meant: "markup" (base × (1 + rate)). Anything else must be
+    # confirmed by the operator before it is used.
+    meaning: Mapped[str] = mapped_column(String(20), default="markup")
+    confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    factory_name: Mapped[str | None] = mapped_column(String(200))
+    source_evidence: Mapped[str | None] = mapped_column(Text)
+    source_total: Mapped[Decimal | None] = mapped_column(MONEY)
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    order: Mapped[Order] = relationship()
+    portions: Mapped[list[FactoryRatePortion]] = relationship(back_populates="agreement", cascade="all, delete-orphan",
+                                                              order_by="FactoryRatePortion.position")
+
+
+class FactoryRatePortion(Base):
+    """One factory rate: for a named section of items, or a share of the remaining base."""
+    __tablename__ = "factory_rate_portions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agreement_id: Mapped[int] = mapped_column(ForeignKey("factory_agreements.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    label: Mapped[str] = mapped_column(String(100), default="")
+    rate: Mapped[Decimal] = mapped_column(PERCENTAGE)
+    section: Mapped[str | None] = mapped_column(String(60))   # items with this pricing_section
+    share: Mapped[Decimal | None] = mapped_column(PERCENTAGE)  # fraction of the remaining base
+    rounding: Mapped[str] = mapped_column(String(20), default="cent")
+    agreement: Mapped[FactoryAgreement] = relationship(back_populates="portions")
+
+
+class CustomerPricingRule(Base):
+    """A customer's markup, optionally narrowed to a season, brand or one order.
+
+    Precedence (most specific wins): order > brand+season > season > brand > customer default.
+    Item-level manual markups and exact prices always win over every rule.
+    """
+    __tablename__ = "customer_pricing_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id"), index=True)
+    brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"), index=True)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), index=True)
+    markup: Mapped[Decimal] = mapped_column(PERCENTAGE)
+    deposit_rate: Mapped[Decimal | None] = mapped_column(PERCENTAGE)
+    rounding: Mapped[str] = mapped_column(String(20), default="cent")
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    customer: Mapped[Customer] = relationship()
+    season: Mapped[Season | None] = relationship()
+    brand: Mapped[Brand | None] = relationship()
+    order: Mapped[Order | None] = relationship()
+
+
+class CreditApplication(Base):
+    """An explicit, reversible use of confirmed credit (e.g. last season's overpayment) on an order."""
+    __tablename__ = "credit_applications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(MONEY)
+    source: Mapped[str] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    order: Mapped[Order] = relationship()
+
+
+class GeneratedDocument(Base):
+    """Every customer/internal document generated, with the data fingerprint it was built from."""
+    __tablename__ = "generated_documents"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30))          # customer | internal
+    file_format: Mapped[str] = mapped_column(String(10))   # xlsx | pdf
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), index=True)
+    season_id: Mapped[int | None] = mapped_column(ForeignKey("seasons.id"), index=True)
+    brand_filter: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), default="preview")  # preview | issued
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    stored_path: Mapped[str] = mapped_column(String(1000))
+    sha256: Mapped[str] = mapped_column(String(64))
+    data_fingerprint: Mapped[str] = mapped_column(String(64))
+    snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    customer: Mapped[Customer | None] = relationship()
+    season: Mapped[Season | None] = relationship()
+
+
+class AgentProposal(Base):
+    """Changes the assistant prepared. Nothing is applied until the operator approves."""
+    __tablename__ = "agent_proposals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    # The conversation it belongs to and its version: a spoken "да" confirms only the newest
+    # pending proposal of the same conversation, and only the version that was shown.
+    conversation: Mapped[str | None] = mapped_column(String(32), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    request_text: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    actions_json: Mapped[str] = mapped_column(Text, default="[]")
+    preview_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending | committed | cancelled | failed
+    result_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation: Mapped[str] = mapped_column(String(32), index=True)
+    role: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(Text, default="")
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SettlementSnapshot(Base):
+    """The season's financial state after each committed change, for date-to-date comparison."""
+    __tablename__ = "settlement_snapshots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    data_json: Mapped[str] = mapped_column(Text)

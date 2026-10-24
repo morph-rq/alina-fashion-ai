@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ state.filename }} · Excel workspace{% endblock %}
+{% block head %}<style>
+.page:has(.wb-heading){max-width:100%;padding-left:24px;padding-right:24px}.wb-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:20px}.wb-heading h1{font-size:25px;overflow-wrap:anywhere;margin:6px 0}.wb-heading p{color:#667085;margin:0}.wb-tabs{display:flex;overflow:auto;gap:5px;border-bottom:1px solid #d7dce4;margin-bottom:12px;padding-bottom:8px}.wb-tabs a{white-space:nowrap;padding:9px 14px;border-radius:7px;color:#475467}.wb-tabs a.active{background:#1c2130;color:#fff}.wb-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;margin:16px 0}.wb-legend span{display:flex;align-items:center;gap:6px}.wb-legend i{width:16px;height:16px;border:1px solid #bcc3cc;border-radius:4px}.wb-toolbar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.wb-toolbar label{min-width:140px}.wb-toolbar input,.wb-toolbar select{max-width:260px}.wb-pricing h2{font-size:18px}.wb-pricing p{margin:6px 0 14px}.wb-filters{margin:12px 0}.wb-bulk{display:flex;align-items:center;gap:14px;padding:12px 0;flex-wrap:wrap}.wb-bulk label{display:flex;align-items:center;gap:8px;white-space:nowrap}.wb-bulk input[type=checkbox],.wb-row-head input,.wb-export-column{width:16px;height:16px;min-height:16px;margin:0}.wb-bulk select{max-width:270px}.wb-grid-wrap{max-height:65vh;overflow:auto;border:1px solid #cbd2dd;border-radius:8px}.wb-grid{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-family:Calibri,Arial,sans-serif;font-size:14px}.wb-grid th,.wb-grid td{border-right:1px solid #d9dee5;border-bottom:1px solid #d9dee5;padding:0;max-width:400px}.wb-grid thead th{position:sticky;top:0;background:#eef1f6;z-index:3;padding:8px 10px;text-align:center;font-weight:600}.wb-grid input{border:1px solid transparent!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;min-height:34px!important;height:34px;padding:5px 8px!important;width:170px;min-width:90px;font-size:14px;font-family:inherit}.wb-grid input:focus{border:2px solid #4778d4!important;background:#ffffffc9!important;outline:none}.wb-grid .wb-row-head{position:sticky;left:0;z-index:2;background:#eef1f6;min-width:65px;padding:6px}.wb-grid thead .wb-row-head{z-index:5}.wb-row-head label{display:flex;align-items:center;gap:5px;font-size:12px}.wb-status-cell{position:sticky;left:65px;z-index:1;min-width:180px;max-width:205px}.wb-status-cell select{border:0;background:transparent;min-height:30px;font-size:12px;padding:3px 5px;max-width:200px}.wb-status-cell small{display:block;font-size:10px;white-space:normal;padding:0 6px 4px;line-height:1.2}.wb-grid .wb-status-head{position:sticky;left:65px;z-index:4;min-width:180px}.wb-grid .wb-row-markup{width:105px}.wb-final-unit,.wb-final-line{min-width:110px;text-align:right;padding:6px 10px!important;font-variant-numeric:tabular-nums;background:#f7f9fc;font-weight:600}.wb-sheet-foot{display:flex;align-items:center;gap:16px;margin-top:12px}.wb-export-columns{grid-column:1/-1}.wb-export-columns>div{display:flex;gap:14px;flex-wrap:wrap;padding:12px 0}.wb-export-columns label{display:flex;align-items:center;gap:4px}#wb-save-state{font-size:13px;color:#44624e}#wb-save-state.error{color:#b42318}
+.wb-grid input[type=checkbox]{width:16px!important;min-width:16px!important;height:16px!important;min-height:16px!important;padding:0!important}.wb-grid .wb-row-head{width:65px;min-width:65px;max-width:65px}.wb-grid .wb-row-head label{justify-content:space-between}
+@media(max-width:700px){.wb-heading{display:block}.page:has(.wb-heading){padding:12px}.wb-legend{gap:8px}.wb-heading .btn-row{margin-top:12px}.wb-grid input{width:125px}}
+</style>{% endblock %}
+{% block content %}
+<span hidden data-fx-ctx='{{ {'workbook': {'source': 'workbook:' ~ token, 'file': state.filename, 'sheet': sheet.name}}|tojson }}'></span>
+<div class="wb-heading"><div><a href="/excel" class="muted">Excel workspace</a><h1>{{ state.filename }}</h1><p>Colours from your Excel file · editable statuses · automatic pricing</p></div><div class="btn-row"><a class="btn" href="/workbooks/{{ token }}/original">Original file</a><a class="btn" href="/workbooks/{{ token }}/modified" title="The original workbook with only your edited cells changed: photos, formulas and formatting kept">Изменённый оригинал{% set n = state.sheets|map(attribute='edits')|select|map('length')|sum %}{% if n %} ({{ n }}){% endif %}</a><a class="btn primary" href="#export">Export Excel</a></div></div>
+{% if error %}<div class="notice danger" role="alert">{{ error }}</div>{% endif %}
+<nav class="wb-tabs" aria-label="Worksheets">{% for s in state.sheets %}<a class="{{ 'active' if loop.index0 == sheet_index }}" href="/workbooks/{{ token }}?sheet={{ loop.index0 }}">{{ s.name }}</a>{% endfor %}</nav>
+<div class="wb-legend"><span><i style="background:#FFF2CC"></i>Yellow: ready, awaiting shipment</span><span><i style="background:#C6E0B4"></i>Green: done and shipped</span><span><i style="background:#FFC7CE"></i>Red: cannot be done</span><span class="muted">Mixed colours require review.</span></div>
+<section class="panel wb-pricing" id="pricing">
+<div><h2>Pricing for {{ sheet.name }}</h2><p class="muted">Row markup overrides this sheet’s default. Final prices recalculate after each saved edit.</p></div>
+<form action="/workbooks/{{ token }}/pricing" method="post" class="wb-toolbar" data-guard>
+<input type="hidden" name="sheet" value="{{ sheet_index }}"><input type="hidden" name="revision" value="{{ sheet.revision }}">
+<label>Default markup %<input name="markup" type="number" min="0" max="1000" step="0.01" value="{{ sheet.rule.markup }}" placeholder="e.g. 35"></label>
+<label>Source price<select name="price_type">{% for value,label in [('unknown','Choose price meaning'),('wholesale','Wholesale / factory'),('final','Final customer price')] %}<option value="{{ value }}" {{ 'selected' if sheet.rule.price_type==value }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Price basis<select name="price_basis">{% for value,label in [('unknown','Choose price basis'),('unit','Per piece'),('line','Whole line')] %}<option value="{{ value }}" {{ 'selected' if sheet.rule.price_basis==value }}>{{ label }}</option>{% endfor %}</select></label>
+<button class="btn">Update pricing</button><a href="#rules">Column mappings & supplier rules</a>
+</form>
+{% if not sheet.rule.mapping.get('stated_price') %}<p class="notice info">Choose the price column under Supplier rules below to calculate final prices.</p>{% endif %}
+</section>
+<section class="panel wb-sheet">
+<div class="section-head"><div><h2>{{ sheet.name }}</h2><p>{{ filtered_count }} matching rows · {{ sheet.rows|length }} total</p></div><span id="wb-save-state" role="status">All changes saved</span></div>
+<form method="get" class="wb-toolbar wb-filters"><input type="hidden" name="sheet" value="{{ sheet_index }}"><label>Find in sheet<input name="q" value="{{ query }}" placeholder="Customer, article, product…"></label><label>Status<select name="status"><option value="">All statuses</option>{% for key,value in statuses.items() %}<option value="{{ key }}" {{ 'selected' if key==status_filter }}>{{ value[0] }}</option>{% endfor %}</select></label><button class="btn">Filter</button><a href="?sheet={{ sheet_index }}">Clear</a></form>
+<form action="/workbooks/{{ token }}/cells" method="post" id="wb-cell-form">
+<input type="hidden" name="sheet" value="{{ sheet_index }}"><input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="revision" value="{{ sheet.revision }}">
+<div class="wb-bulk"><label><input type="checkbox" id="wb-select-all"> Select visible rows</label><select id="wb-bulk-status"><option value="">Set selected rows…</option><option value="ready">Yellow · ready</option><option value="shipped">Green · shipped</option><option value="cannot">Red · cannot be done</option><option value="ordered">In progress</option><option value="auto">Use source Excel colours</option></select><button type="button" class="btn sm" id="wb-apply-status">Apply status</button><span class="muted" id="wb-selection-count">0 selected</span></div>
+<div class="wb-grid-wrap"><table class="wb-grid"><thead><tr><th class="wb-row-head">Row</th><th class="wb-status-head">Status</th>{% for col,label in columns %}<th>{{ label }}</th>{% endfor %}<th>Markup %</th><th>Final / piece</th><th>Final / line</th><th>Notes</th></tr></thead><tbody>
+{% for row_number,row in rows %}{% set meta=sheet.get('row_meta',{}).get(row_number|string,{}) %}{% set status=row_statuses[row_number|string] %}
+<tr data-row="{{ row_number }}" data-status="{{ status }}"><th class="wb-row-head"><label><input type="checkbox" class="wb-row-select" value="{{ row_number }}">{{ row_number }}</label></th>
+<td class="wb-status-cell" style="background:{{ statuses[status][1] }}"><select name="meta:{{ row_number }}:status" class="wb-row-status" aria-label="Status row {{ row_number }}"><option value="">From Excel</option>{% for key in ['ordered','ready','shipped','cannot'] %}<option value="{{ key }}" {{ 'selected' if meta.get('status')==key }}>{{ statuses[key][0] }}</option>{% endfor %}</select><small class="wb-status-label">{{ statuses[status][0] }}</small></td>
+{% for col,label in columns %}{% set style=sheet.get('styles',{}).get(row_number|string+':'+col|string,{}) %}{% set source_fill=style.get('fill') or '#FFFFFF' %}
+<td class="wb-source-cell" style="background:{{ statuses[meta.status][1] if meta.get('status') else source_fill }}" data-source-fill="{{ source_fill }}"><input aria-label="{{ label }}{{ row_number }}" name="cell:{{ row_number }}:{{ col }}" style="width:{{ [320,[80,(sheet.get('column_dimensions',{}).get(col|string,{}).get('width',20)*7)|int]|max]|min }}px;min-width:60px;color:{{ style.get('font') or '#172033' }};font-weight:{{ '700' if style.get('bold') else '400' }};font-style:{{ 'italic' if style.get('italic') else 'normal' }};text-align:{{ style.get('align') if style.get('align') in ['left','right','center'] else 'left' }}" value="{{ row[col-1] if col <= row|length and row[col-1] is not none else '' }}"></td>{% endfor %}
+<td><input class="wb-row-markup" type="number" min="0" max="1000" step="0.01" aria-label="Markup row {{ row_number }}" name="meta:{{ row_number }}:markup" value="{{ meta.get('markup','') }}" placeholder="{{ sheet.rule.markup or 'Default' }}"></td><td class="wb-final-unit">{{ pricing[row_number|string].final_unit or '—' }}</td><td class="wb-final-line">{{ pricing[row_number|string].final_line or '—' }}</td><td><input name="meta:{{ row_number }}:note" value="{{ meta.get('note','') }}" aria-label="Note row {{ row_number }}"></td>
+</tr>{% endfor %}
+</tbody></table></div>
+<div class="wb-sheet-foot"><button class="btn" id="wb-save-button">Save cell edits</button><small>Cell, status and row markup edits save automatically. Yellow means factory finished; green means shipped.</small></div>
+</form>
+<nav class="btn-row" style="margin-top:12px">{% if page>1 %}<a class="btn" href="?sheet={{ sheet_index }}&page={{ page-1 }}&status={{ status_filter|urlencode }}&q={{ query|urlencode }}">Previous rows</a>{% endif %}<span>Page {{ page }} / {{ page_count }}</span>{% if page<page_count %}<a class="btn" href="?sheet={{ sheet_index }}&page={{ page+1 }}&status={{ status_filter|urlencode }}&q={{ query|urlencode }}">Next rows</a>{% endif %}</nav>
+</section>
+<section class="panel" id="export"><h2>Export only what you need</h2><p>Choose sheets, rows, statuses and columns. Excel exports include saved edits and colours. Pricing columns are calculated from the saved mappings and markup.</p>
+<form action="/workbooks/{{ token }}/download" method="get" id="wb-export-form" class="form-grid">
+<label>Export scope<select id="wb-export-scope"><option value="sheet">Current worksheet</option><option value="selected">Checked rows on this page</option><option value="all">All worksheets</option></select></label>
+<input type="hidden" name="sheets" value="{{ sheet_index }}"><input type="hidden" name="rows" value=""><input type="hidden" name="columns" value="">
+<label>Only status<select name="status"><option value="">All statuses</option>{% for key,value in statuses.items() %}<option value="{{ key }}" {{ 'selected' if status_filter==key }}>{{ value[0] }}</option>{% endfor %}</select></label>
+<label>Contains text<input name="q" value="{{ query }}" placeholder="Article, customer or product"></label>
+<label>Only customer<input name="customer" placeholder="Uses mapped customer column"></label>
+<label>Extra columns<select name="extras"><option value="true">Include status, markup, final prices, notes</option><option value="false">Source columns only</option></select></label>
+<label>Header rows<select name="headers"><option value="true">Keep original headers</option><option value="false">Only selected data rows</option></select></label>
+<details class="wb-export-columns"><summary>Choose columns to include (all selected by default)</summary><div>{% for col,label in columns %}<label><input type="checkbox" class="wb-export-column" value="{{ col }}" checked> {{ label }}</label>{% endfor %}</div><small>Column choices apply to current-sheet or checked-row exports.</small></details>
+<div><button class="btn primary">Download Excel</button></div>
+</form><p class="muted">Exports are styled cell values. To keep pictures and formulas, download «Изменённый оригинал»: the original file with only your edited cells changed.</p></section>
+<section class="panel" id="claude"><h2>Work with Claude</h2>
+<p>Ask about this sheet or describe cell edits. Claude reads the selected range and the first 10 rows as headers. Changes are proposed for your review.</p>
+<form action="/workbooks/{{ token }}/ask" method="post" data-once>
+<input type="hidden" name="sheet" value="{{ sheet_index }}">
+<div class="form-grid"><label>First row<input type="number" name="start" min="1" value="{{ (page-1)*40+1 }}" required></label><label>Last row (up to 100 rows)<input type="number" name="end" min="1" value="{{ [page*40,sheet.rows|length]|min }}" required></label></div>
+<label>Your question or change<textarea name="question" rows="3" maxlength="4000" required placeholder="Which columns contain the article, quantity and wholesale price? Or: change cell D3 to 2."></textarea></label>
+<button class="btn primary">Ask Claude</button><small>Save cell edits first. Requests may take up to a minute.</small>
+</form>
+{% if sheet.assistant %}<div style="margin-top:16px"><strong>{{ sheet.assistant.question }}</strong><p style="white-space:pre-wrap">{{ sheet.assistant.answer }}</p><p>References: {{ sheet.assistant.references|join(', ') }}</p>
+{% if sheet.assistant.changes %}<table class="table"><thead><tr><th>Cell</th><th>Current value</th><th>Proposed value</th><th>Reason</th></tr></thead><tbody>{% for change in sheet.assistant.changes %}<tr><td>{{ change.cell }}</td><td>{{ change.before if change.before is not none else '' }}</td><td>{{ change.value }}</td><td>{{ change.reason }}</td></tr>{% endfor %}</tbody></table>
+{% if sheet.assistant.applied %}<p class="notice ok">Changes applied to the working copy. The original is preserved.</p>{% elif sheet.assistant.revision == sheet.revision %}<form action="/workbooks/{{ token }}/apply-claude" method="post" data-once><input type="hidden" name="sheet" value="{{ sheet_index }}"><input type="hidden" name="proposal" value="{{ sheet.assistant.id }}"><button class="btn primary">Apply these cell changes</button></form>{% else %}<p>This proposal is stale because the sheet changed. Ask Claude again.</p>{% endif %}
+{% endif %}</div>{% endif %}
+</section>
+<details class="panel" id="rules"><summary><strong>Supplier rules & column mappings</strong></summary><h2>Supplier rules for this sheet</h2><p>Map one product per row. For size grids or several customers in a cell, separate the allocations before saving products. Unknown price meanings remain questions in the draft.</p>
+{% if profiles %}<form action="/workbooks/{{ token }}/rules" method="post"><input type="hidden" name="sheet" value="{{ sheet_index }}"><input type="hidden" name="revision" value="{{ sheet.revision }}"><label>Saved supplier rule<select name="load_profile">{% for name in profiles %}<option>{{ name }}</option>{% endfor %}</select></label><button class="btn">Load rule</button></form>{% endif %}
+<form action="/workbooks/{{ token }}/rules" method="post" data-guard>
+<input type="hidden" name="sheet" value="{{ sheet_index }}"><input type="hidden" name="revision" value="{{ sheet.revision }}">
+<div class="form-grid">
+<label>Season<input name="season" value="{{ sheet.rule.season }}" placeholder="SS27" maxlength="40"></label>
+<label>Brand / table<input name="brand" value="{{ sheet.rule.brand }}" maxlength="200"></label>
+<label>First product row<input type="number" name="start" min="1" value="{{ sheet.rule.start }}"></label>
+<label>Last product row<input type="number" name="end" min="1" value="{{ sheet.rule.end }}"></label>
+{% for field,label in fields.items() %}<label>{{ label }} column<select name="map:{{ field }}"><option value="">Not mapped</option>{% for col,letter in columns %}<option value="{{ col }}" {{ 'selected' if sheet.rule.mapping.get(field) == col|string }}>{{ letter }}</option>{% endfor %}</select></label>{% endfor %}
+<label>Default customer (when cell is empty)<input name="customer" value="{{ sheet.rule.customer }}"></label>
+<label>Price meaning<select name="price_type">{% for value,label in [('unknown','Ask during review'),('wholesale','Wholesale / factory'),('final','Final customer price')] %}<option value="{{ value }}" {{ 'selected' if sheet.rule.price_type==value }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Price basis<select name="price_basis">{% for value,label in [('unknown','Ask during review'),('unit','Per piece'),('line','Whole line')] %}<option value="{{ value }}" {{ 'selected' if sheet.rule.price_basis==value }}>{{ label }}</option>{% endfor %}</select></label>
+<label>Markup % for new brand tables<input name="markup" type="number" min="0" max="100" step="0.01" value="{{ sheet.rule.markup }}"><small>Existing brand terms are preserved. Currency is EUR.</small></label>
+<label>Supplier rule name (save for future uploads)<input name="profile_name" placeholder="e.g. Dior supplier layout" maxlength="100"></label>
+<label>Notes for review (not automatic calculations)<textarea name="notes">{{ sheet.rule.notes }}</textarea></label>
+</div><button class="btn primary">Save rules</button>
+</form>
+<form action="/workbooks/{{ token }}/preview" method="post" style="margin-top:12px"><input type="hidden" name="sheet" value="{{ sheet_index }}"><button class="btn">Preview mapped rows</button></form>
+</details>
+{% if preview is not none %}<section class="panel"><h2>{{ preview|length }} product rows in this preview</h2><p>Blank rows and rows without a mapped product name or article are excluded. Check the range to exclude headings and totals. Missing values stay unresolved for review; a missing quantity defaults to 1.</p>
+<div style="overflow:auto"><table class="table"><thead><tr><th>Source</th><th>Customer</th><th>Article</th><th>Product</th><th>Size</th><th>Quantity</th><th>Price</th></tr></thead><tbody>{% for row in preview %}<tr><td>{{ row.evidence_quotes[0] }}</td><td>{{ row.customer_name or 'Needs review' }}</td><td>{{ row.article or '' }}</td><td>{{ row.product_name or '' }}</td><td>{{ row.explicit_size or 'Needs review' }}</td><td>{{ row.quantity }}</td><td>{{ row.stated_price or 'Needs review' }}</td></tr>{% endfor %}</tbody></table></div>
+{% if preview and not error %}<form action="/workbooks/{{ token }}/draft" method="post" data-once><input type="hidden" name="sheet" value="{{ sheet_index }}"><input type="hidden" name="revision" value="{{ sheet.revision }}"><button class="btn primary">Create editable product draft</button></form>{% endif %}
+</section>{% endif %}
+{% endblock %}
+
+{% block scripts %}<script>
+(()=>{
+const form=document.getElementById('wb-cell-form'),indicator=document.getElementById('wb-save-state');
+const colours={{ statuses|tojson }},rows=[...document.querySelectorAll('.wb-grid tbody tr')];
+let timer,dirty=false,saving=false,failed=false;
+const setState=(text,error=false)=>{indicator.textContent=text;indicator.classList.toggle('error',error)};
+const syncRevisions=value=>{document.querySelectorAll('input[name=revision]').forEach(x=>x.value=value)};
+const save=async()=>{
+ clearTimeout(timer);if(saving||!dirty)return;dirty=false;saving=true;setState('Saving…');
+ try{const r=await fetch(form.action,{method:'POST',body:new FormData(form),headers:{'X-Workbook-Autosave':'1'}});const data=await r.json();if(!r.ok)throw Error(data.error||'Could not save. Check the entered values.');
+ syncRevisions(data.revision);failed=false;
+ for(const row of rows){const value=data.rows[row.dataset.row];if(!value)continue;row.dataset.status=value.status;row.querySelector('.wb-status-cell').style.background=colours[value.status][1];row.querySelector('.wb-status-label').textContent=colours[value.status][0];row.querySelector('.wb-final-unit').textContent=value.final_unit??'—';row.querySelector('.wb-final-line').textContent=value.final_line??'—';const override=row.querySelector('.wb-row-status').value;row.querySelectorAll('.wb-source-cell').forEach(c=>c.style.background=override?colours[override][1]:c.dataset.sourceFill)}
+ setState(dirty?'Saving newer edits…':'All changes saved');
+ }catch(error){failed=true;dirty=true;setState(error.message,true)}finally{saving=false;if(dirty&&!failed)save()}
+};
+form.addEventListener('input',event=>{if(event.target.type==='checkbox')return;dirty=true;failed=false;setState('Unsaved changes');clearTimeout(timer);timer=setTimeout(save,850)});
+form.addEventListener('change',event=>{if(event.target.type==='checkbox')return;dirty=true;failed=false;save()});
+form.addEventListener('submit',event=>{event.preventDefault();dirty=true;failed=false;save()});
+window.addEventListener('beforeunload',event=>{if(dirty||saving){event.preventDefault();event.returnValue=''}});
+const selected=()=>[...document.querySelectorAll('.wb-row-select:checked')];
+const selectionCount=()=>document.getElementById('wb-selection-count').textContent=selected().length+' selected';
+document.getElementById('wb-select-all').addEventListener('change',event=>{document.querySelectorAll('.wb-row-select').forEach(x=>x.checked=event.target.checked);selectionCount()});document.querySelectorAll('.wb-row-select').forEach(x=>x.addEventListener('change',selectionCount));
+document.getElementById('wb-apply-status').addEventListener('click',()=>{const status=document.getElementById('wb-bulk-status').value;if(!status||!selected().length)return;for(const box of selected())box.closest('tr').querySelector('.wb-row-status').value=status==='auto'?'':status;dirty=true;failed=false;save()});
+document.getElementById('wb-export-form').addEventListener('submit',event=>{if(dirty||saving){event.preventDefault();setState('Wait until edits finish saving before exporting.',true);return}const f=event.target,scope=document.getElementById('wb-export-scope').value;f.elements.sheets.value=scope==='all'?'':'{{ sheet_index }}';f.elements.rows.value=scope==='selected'?selected().map(x=>x.value).join(','):'';const cols=[...document.querySelectorAll('.wb-export-column:checked')].map(x=>x.value);if(scope==='selected'&&!selected().length){event.preventDefault();alert('Check the rows you want to export first.');return}if(scope!=='all'&&!cols.length){event.preventDefault();alert('Choose at least one column.');return}f.elements.columns.value=scope==='all'?'':cols.join(',')});
+})();
+</script>{% endblock %}

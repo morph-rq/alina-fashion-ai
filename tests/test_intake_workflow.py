@@ -357,3 +357,78 @@ def test_failed_storage_records_nothing_as_captured(env, monkeypatch):
     assert response.status_code == 422
     with factory() as db:
         assert db.scalar(select(func.count()).select_from(SourceItem)) == 0
+
+
+def test_upload_creates_and_reuses_filename_season(env, monkeypatch):
+    client, factory, _ = env
+    fake_ai(monkeypatch, ai_intake.IntakeBundle(orders=[]))
+    for _ in range(2):
+        response = client.post('/intake', files={'attachments': ('ORDER__SS27_Alina.xlsx', b'test', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}, follow_redirects=False)
+        assert response.status_code == 303
+        assert response.headers['location'].startswith('/intake/')
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(Season).where(Season.name == 'SS27')) == 1
+        season = db.scalar(select(Season).where(Season.name == 'SS27'))
+        assert db.scalar(select(func.count()).select_from(IntakeSession).where(IntakeSession.season_id == season.id)) == 2
+
+
+def test_ambiguous_upload_does_not_create_season_or_intake(env, monkeypatch):
+    client, factory, _ = env
+    monkeypatch.setattr(ai_intake, 'ai_configured', lambda: False)
+    response = client.post('/intake', files={'attachments': ('SS27_FW27.xlsx', b'test')}, follow_redirects=False)
+    assert response.headers['location'].startswith('/inbox?error=')
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(IntakeSession)) == 0
+        assert db.scalar(select(func.count()).select_from(Season)) == 1
+
+
+def test_season_detection_reads_sheets_and_preserves_upload():
+    from fastapi import UploadFile
+    from openpyxl import Workbook
+    from app.intake_routes import infer_upload_season
+    stream = BytesIO()
+    book = Workbook()
+    book.active.title = 'SS27'
+    book.save(stream)
+    stream.seek(0)
+    upload = UploadFile(filename='orders.xlsx', file=stream)
+    assert infer_upload_season([upload]) == 'SS27'
+    assert stream.tell() == 0
+
+
+def test_large_excel_capture_and_local_extraction(env, monkeypatch):
+    from openpyxl import Workbook
+    from zipfile import ZipFile, ZIP_STORED
+    from app.intake_routes import _analysis_sources
+    client, factory, _ = env
+    stream = BytesIO()
+    book = Workbook()
+    book.active.append(['Article', 'Size', 'Quantity'])
+    book.active.append(['COAT-1', '38', 1])
+    book.save(stream)
+    # Embedded media can dominate workbook size; read-only extraction ignores it.
+    with ZipFile(stream, 'a', compression=ZIP_STORED) as archive:
+        archive.writestr('xl/media/large.bin', b'x' * (26 * 1024 * 1024))
+    content = stream.getvalue()
+    monkeypatch.setattr(ai_intake, 'ai_configured', lambda: False)
+    response = client.post('/intake', files={'attachments': ('ORDER_SS27.xlsx', content)}, follow_redirects=False)
+    assert response.status_code == 303
+    with factory() as db:
+        session = db.scalar(select(IntakeSession))
+        item = db.scalar(select(SourceItem).where(SourceItem.session_id == session.id))
+        assert item.blob.size_bytes == len(content)
+        loaded = _analysis_sources(db, session, [item.id])
+        parts, names = ai_intake._bundle_parts('', [(name, mime, data) for name, mime, data, _ in loaded])
+        assert 'COAT-1' in parts[1]['text']
+        assert names == ['ORDER_SS27.xlsx']
+        assert all('inlineData' not in part for part in parts)
+
+
+def test_excel_size_limit_still_rejects_oversize(env, monkeypatch):
+    client, factory, _ = env
+    monkeypatch.setattr(source_store, 'MAX_SPREADSHEET_BYTES', 100)
+    response = client.post('/intake', files={'attachments': ('ORDER_SS27.xlsx', b'x' * 101)}, follow_redirects=False)
+    assert response.status_code == 422
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(IntakeSession)) == 0
+        assert db.scalar(select(func.count()).select_from(Season).where(Season.name == 'SS27')) == 0

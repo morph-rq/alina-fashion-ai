@@ -158,7 +158,7 @@ def test_every_page_uses_permanent_light_theme_and_ai_help(workspace_client: Tes
     page = workspace_client.get("/")
     assert page.status_code == 200
     assert 'data-theme="light"' in page.text
-    assert "AI Help" in page.text
+    assert "Спросите Fashion AI" in page.text and "/static/copilot.js" in page.text
     assert "fashion-theme" not in page.text
     assert "theme-toggle" not in page.text
     # One design-system stylesheet replaced the four layered ones.

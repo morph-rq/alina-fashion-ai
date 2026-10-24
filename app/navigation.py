@@ -1,6 +1,7 @@
 """Navigation helpers shared by templates and routes.
 
-The interface has four primary areas (Overview, Workspace, Inbox, Customers) plus Settings.
+Primary areas follow the owner's workflow (Обзор, Заказы, Фабрики, Клиенты, Документы, Ассистент)
+plus Settings. Inbox (incoming sources) is part of Документы.
 Every existing URL keeps working; these helpers only decide which area and Workspace view
 a URL belongs to, and validate same-site "return here" links.
 """
@@ -9,18 +10,24 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 AREAS = (
-    ("overview", "Overview", "/"),
-    ("workspace", "Workspace", "/worksheet"),
-    ("inbox", "Inbox", "/inbox"),
-    ("customers", "Customers", "/customers"),
+    ("overview", "Обзор", "/"),
+    ("workspace", "Заказы", "/board"),
+    ("factories", "Фабрики", "/factories"),
+    ("customers", "Клиенты", "/pricing"),
+    ("inbox", "Документы", "/documents"),
+    ("assistant", "Ассистент", "/assistant"),
 )
 
-_INBOX = ("/inbox", "/intake", "/ai-intake", "/source-reviews", "/intake-sources", "/sources/")
-_CUSTOMERS = ("/customers", "/reports")
-_SETTINGS = ("/settings", "/rules", "/connections", "/recovery", "/workspace/reset", "/audit", "/library", "/storage")
+_INBOX = ("/inbox", "/intake", "/ai-intake", "/source-reviews", "/intake-sources", "/sources/", "/documents",
+          "/factory-import", "/originals")
+_CUSTOMERS = ("/customers", "/reports", "/pricing")
+_FACTORIES = ("/factories",)
+_ASSISTANT = ("/assistant",)
+_SETTINGS = ("/settings", "/rules", "/connections", "/recovery", "/workspace/reset", "/audit", "/library", "/storage", "/history")
 _OVERVIEW = ("/operations", "/validation")
 
 WORKSPACE_VIEWS = (
+    ("board", "Заказы по фабрикам", "/board"),
     ("products", "Products", "/worksheet"),
     ("brands", "Brands", "/brands"),
     ("logistics", "Ready & shipping", "/logistics"),
@@ -28,6 +35,7 @@ WORKSPACE_VIEWS = (
     ("tables", "Tables", "/tables"),
 )
 _VIEW_PREFIXES = {
+    "board": ("/board",),
     "products": ("/worksheet", "/excel", "/import", "/imports", "/product-images"),
     "brands": ("/brands", "/seasons", "/orders", "/manual-entry"),
     "logistics": ("/logistics", "/ready-batches", "/shipments", "/groups"),
@@ -43,6 +51,10 @@ def nav_area(path: str) -> str:
         return "inbox"
     if path.startswith(_CUSTOMERS):
         return "customers"
+    if path.startswith(_FACTORIES):
+        return "factories"
+    if path.startswith(_ASSISTANT):
+        return "assistant"
     if path.startswith(_SETTINGS):
         return "settings"
     return "workspace"

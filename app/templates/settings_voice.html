@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Голос{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/settings">Settings</a><span aria-hidden="true">/</span><span>Голос</span></nav>
+<header class="page-header"><div><h1>Голос — ElevenLabs</h1><p class="page-sub">Говорите с ассистентом по-русски: распознавание Scribe v2 Realtime, ответы голосом ElevenLabs. Без ключа приложение и чат работают как обычно.</p></div>
+  <div class="page-actions"><a class="btn primary" href="/assistant">Открыть ассистента</a></div></header>
+{% if message %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ message }}</strong></div></div>{% endif %}
+{% if error %}<div class="notice danger" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
+
+<section class="panel">
+  <h2>Состояние</h2>
+  {% if voice.configured %}
+  <p><span class="badge tone-ok">Подключено</span> ключ {{ voice.hint or 'задан' }} · {{ 'сохранён здесь' if voice.source == 'app' else 'из файла .env (ELEVENLABS_API_KEY)' }}{% if voice.saved_at %} · {{ voice.saved_at }}{% endif %}<br>
+    Голос <strong>{{ voice.voice_name }}</strong> · модель <strong>{{ voice.model }}</strong> · распознавание <strong>scribe_v2_realtime</strong>, язык {{ voice.language }}.</p>
+  <p class="muted" id="voice-usage">Расход символов: <button class="btn sm quiet" type="button" data-usage>показать</button></p>
+  {% else %}
+  <p><span class="badge">Не подключено</span> Вставьте ключ ElevenLabs ниже. Где взять: elevenlabs.io › Developers › API Keys › Create key. Ключ начинается с <code>sk_</code>; нужны разрешения «Text to Speech» и «Speech to Text». Можно также задать <code>ELEVENLABS_API_KEY</code> в файле .env.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Ключ, голос и модель</h2>
+  <form action="/settings/voice" method="post" class="form-grid" data-once>
+    <label class="wide">Ключ ElevenLabs<input name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="{{ 'Оставьте пустым, чтобы сохранить текущий ключ ' ~ (voice.hint or '') if voice.configured else 'sk_…' }}"><small>Хранится зашифрованным на этом Mac (data/private), не попадает в браузер, резервные копии и Git. Показываются только последние 4 символа.</small></label>
+    <label>Голос<select name="voice_id">{% for id, label in voices.items() %}<option value="{{ id }}" {{ 'selected' if id == voice.voice_id }}>{{ label }}</option>{% endfor %}</select>
+      <small>{% if account_voices is none and request.query_params.get('list') %}Ключ не может читать список голосов (нет разрешения voices_read) — доступны стандартные голоса и ID своего голоса.{% else %}<a href="/settings/voice?list=1">Загрузить голоса аккаунта</a>{% endif %}</small></label>
+    <label>Свой голос (ID, необязательно)<input name="custom_voice_id" autocomplete="off" spellcheck="false" placeholder="например, из Voice Library"></label>
+    <fieldset class="wide"><legend>Модель речи</legend>
+      {% for id, label in models.items() %}<label class="check-line"><input type="radio" name="model" value="{{ id }}" {{ 'checked' if voice.model == id }}> {{ label }}</label>{% endfor %}
+      <small>Если модель недоступна для ключа, автоматически используется Flash v2.5.</small>
+    </fieldset>
+    <label>Язык распознавания<select name="language"><option value="ru" {{ 'selected' if voice.language == 'ru' }}>Русский (английские названия брендов распознаются)</option><option value="en" {{ 'selected' if voice.language == 'en' }}>English</option></select></label>
+    <label class="check-line"><input type="checkbox" name="speak_replies" value="1" {{ 'checked' if voice.speak_replies }}> Отвечать голосом</label>
+    <label class="check-line"><input type="checkbox" name="review_before_send" value="1" {{ 'checked' if voice.review_before_send }}> Показывать распознанный текст перед отправкой (кнопка «Отправить»)</label>
+    <div class="form-actions"><button class="btn primary" name="action" value="test">Проверить и сохранить</button><button class="btn" name="action" value="save">Сохранить без проверки</button>
+      {% if voice.configured %}<button class="btn quiet" type="button" data-voice-sample>Прослушать голос</button>{% endif %}</div>
+  </form>
+  {% if voice.source == 'app' %}<form action="/settings/voice" method="post" data-confirm="Удалить сохранённый ключ ElevenLabs?"><input type="hidden" name="action" value="remove"><button class="btn sm danger">Удалить ключ</button></form>{% endif %}
+</section>
+
+<section class="panel">
+  <h2>Приватность</h2>
+  <ul class="plain-list">
+    <li>Микрофон включается только кнопкой; в режиме «без рук» горит красный индикатор и есть «Стоп».</li>
+    <li>Звук идёт из браузера прямо в ElevenLabs по одноразовому токену (15 минут, один раз). Записи микрофона приложение не хранит.</li>
+    <li>Загруженная голосовая заметка расшифровывается в памяти и сразу удаляется.</li>
+    <li>Озвучиваются только короткие итоги без кода, таблиц и формул; суммы берутся из расчёта приложения.</li>
+    <li>Голосом можно подтвердить наценки, статусы и документы. Оплаты, условия фабрики и переносы — только кнопкой.</li>
+  </ul>
+</section>
+{% endblock %}
+{% block scripts %}<script>
+document.querySelector('[data-voice-sample]')?.addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  const r = await fetch('/api/voice/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Здравствуйте! По текущему заказу IDS должна внести предоплату €6 225.00.' }) }).then((x) => x.json());
+  if (r.id) { const a = new Audio(`/api/voice/speech/${r.id}`); a.onended = a.onerror = () => { e.target.disabled = false; }; a.play(); } else { alert(r.error || 'Не получилось'); e.target.disabled = false; }
+});
+document.querySelector('[data-usage]')?.addEventListener('click', async (e) => {
+  const r = await fetch('/api/voice/usage').then((x) => x.json());
+  e.target.parentElement.textContent = r.usage ? `Расход символов: ${r.usage.used} из ${r.usage.limit} (${r.usage.tier})` : (r.note || r.error || 'нет данных');
+});
+</script>{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Фабрики и предоплата{% endblock %}
+{% block content %}
+<span hidden data-fx-ctx='{{ {'season': season.name if season else None, 'brand': brand or None, 'figures': ([{'label': 'Фабрике всего', 'value': '€ ' ~ ledger.settlement.factory.total|string}, {'label': 'Предоплата фабрике', 'value': '€ ' ~ ledger.settlement.factory_deposit_required|string}, {'label': 'Оплачено фабрике', 'value': '€ ' ~ ledger.settlement.confirmed_factory_payments|string}] if ledger else [])}|tojson }}'></span>
+<header class="page-header">
+  <div>
+    <h1>Фабрики {{ season.name if season else '' }}{% if brand %} · {{ brand }}{% endif %}</h1>
+    <p class="page-sub">Сколько должна получить фабрика, сколько внесут клиенты напрямую, и сколько остаётся перевести вам. План и подтверждённые оплаты показаны отдельно.</p>
+  </div>
+  <div class="page-actions">{{ ui.season_select(seasons, season, label='Сезон', action='/factories') }}</div>
+</header>
+{% if not season or not ledger %}
+{% call ui.empty('Нет заказов', 'Загрузите файл фабрики, чтобы увидеть расчёт.') %}<a class="btn primary" href="/factory-import">Загрузить</a>{% endcall %}
+{% else %}
+{% set s = ledger.settlement %}
+<div class="fx-recon">
+  <section class="panel fx-plan">
+    <h2>План предоплаты</h2>
+    <dl class="fx-dl">
+      <dt>Сумма заказа у фабрики</dt><dd>€ {{ s.factory.total|money }}</dd>
+      <dt>Предоплата фабрике</dt><dd><strong>€ {{ s.factory_deposit_required|money }}</strong></dd>
+      <dt>Депозиты клиентов (ожидаются)</dt><dd>− € {{ s.external_deposits_expected|money }}</dd>
+      <dt class="fx-total">Ваш взнос</dt><dd class="fx-total">{% if s.owner_net_deposit_planned >= 0 %}€ {{ s.owner_net_deposit_planned|money }}{% else %}€ 0.00 <small>(клиенты покрывают на € {{ (-s.owner_net_deposit_planned)|money }} больше — это кредит, не перевод)</small>{% endif %}</dd>
+      {% if s.owner %}<dt class="muted">Ваш собственный заказ по цене фабрики</dt><dd class="muted">€ {{ s.owner_nominal_cost|money }} (его 50 % — € {{ s.owner_nominal_deposit|money }})</dd>{% endif %}
+    </dl>
+  </section>
+  <section class="panel fx-actual">
+    <h2>Фактически</h2>
+    <dl class="fx-dl">
+      <dt>Подтверждено оплат фабрике</dt><dd>€ {{ s.confirmed_factory_payments|money }}</dd>
+      <dt>· из них ваши переводы</dt><dd>€ {{ s.owner_paid_to_factory|money }}</dd>
+      {% if s.credits_applied %}<dt>Применён кредит</dt><dd>€ {{ s.credits_applied|money }}</dd>{% endif %}
+      <dt>Осталось по предоплате</dt><dd class="{{ 'fx-due' if s.factory_deposit_outstanding > 0 else '' }}"><strong>€ {{ s.factory_deposit_outstanding|money }}</strong></dd>
+      <dt>Перевести вам сейчас</dt><dd><strong>€ {{ s.owner_transfer_now|money }}</strong> <small class="muted">если клиенты заплатят как ожидается</small></dd>
+      <dt>За готовые изделия (вторая часть)</dt><dd>€ {{ ledger.ready_factory_balance|money }}</dd>
+      <dt>Остаток по всему заказу</dt><dd>€ {{ s.factory_balance_outstanding|money }}</dd>
+      {% if s.factory_overpaid %}<dt>Переплата фабрике</dt><dd class="fx-ok">€ {{ s.factory_overpaid|money }} <small>— не списывается на другие заказы без вашего решения</small></dd>{% endif %}
+      {% if s.received_by_owner_to_forward %}<dt>Клиенты заплатили вам</dt><dd>€ {{ s.received_by_owner_to_forward|money }}</dd>{% endif %}
+    </dl>
+  </section>
+</div>
+{% for w in ledger.warnings + s.notes %}<div class="notice tone-warn">⚠ {{ w }}</div>{% endfor %}
+
+<section class="section">
+  <div class="section-head"><h2>Клиенты</h2><a class="btn sm" href="/pricing?season={{ season.name }}">Изменить наценки</a></div>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Клиент</th><th class="num">База</th><th class="num">Наценка</th><th class="num">Сумма</th><th class="num">Предоплата</th><th class="num">Оплачено</th><th class="num">Обещано</th><th class="num">Осталось по предоплате</th><th class="num">Ваша разница</th></tr></thead>
+    <tbody>{% for code, c in s.customers|dictsort %}
+      <tr><td><strong>{{ code }}</strong>{% if c.is_owner %} <span class="chip">вы · цена фабрики</span>{% endif %}</td>
+        <td class="num">{{ c.base|money }}</td><td class="num">{{ (c.effective_rate)|pct }}%</td><td class="num"><strong>{{ c.total|money }}</strong></td>
+        <td class="num">{{ c.deposit_due|money }}</td><td class="num">{{ (c.confirmed_to_factory + c.confirmed_to_owner)|money }}</td>
+        <td class="num muted">{{ c.expected|money if c.expected else '' }}</td>
+        <td class="num {{ 'fx-due' if c.deposit_outstanding > 0 and not c.is_owner else '' }}">{{ c.deposit_outstanding|money if not c.is_owner else '—' }}</td>
+        <td class="num muted">{{ c.spread|money if not c.is_owner else '' }}</td></tr>{% endfor %}</tbody>
+    <tfoot><tr><th>Итого</th><th class="num">{{ s.factory.base|money }}</th><th></th><th></th><th class="num">{{ (s.external_deposits_expected)|money }} + ваш</th><th></th><th></th><th></th><th class="num muted" title="Теоретическая разница цен, ещё не полученная">{{ s.theoretical_spread|money }}</th></tr></tfoot>
+  </table></div>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Заказы по брендам и условия фабрики</h2></div>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Бренд</th><th>Условия фабрики</th><th class="num">База</th><th class="num">Фабрике</th><th class="num">Предоплата</th><th class="num">Готово (к оплате)</th><th class="num">Итог в файле</th><th></th></tr></thead>
+    <tbody>{% for v in ledger.orders %}{% set agreement = agreements.get(v.order.id) %}
+      <tr><td><a href="/factories?season={{ season.name }}&amp;brand={{ v.order.brand.name|urlencode }}">{{ v.order.brand.name }}</a></td>
+        <td>{{ describe(agreement) }}{% if agreement and not agreement.confirmed %} <span class="chip tone-warn">не подтверждено</span>{% endif %}</td>
+        <td class="num">{{ v.factory_base|money }}</td><td class="num"><strong>{{ v.factory_total|money }}</strong></td><td class="num">{{ v.deposit_required|money }}</td>
+        <td class="num">{{ v.ready_factory_balance|money }}</td>
+        <td class="num">{% if v.source_total is not none %}{{ v.source_total|money }}{% if v.source_difference %} <span class="chip tone-warn" title="Разница с файлом фабрики">{{ v.source_difference|money }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td><button class="btn sm" type="button" data-terms="{{ v.order.id }}" data-brand="{{ v.order.brand.name }}">Изменить</button></td></tr>{% endfor %}</tbody>
+  </table></div>
+  <form class="fx-terms-form panel" id="fx-terms" hidden data-season="{{ season.name }}">
+    <h3>Условия фабрики: <span data-terms-brand></span></h3>
+    <p class="muted">Наценка фабрики: база × (1 + %). Можно разделить сумму: например 25 % на половину и 30 % на вторую половину.</p>
+    <input type="hidden" name="order_id">
+    <div class="fx-row"><label>Процент <input name="rate1" size="5" inputmode="decimal" required>%</label><label>доля <input name="share1" size="4" value="100">% суммы</label></div>
+    <div class="fx-row"><label>Второй процент <input name="rate2" size="5" inputmode="decimal">%</label><label>доля <input name="share2" size="4">% суммы</label></div>
+    <div class="fx-row"><label>Предоплата <input name="deposit" size="4" value="50">%</label></div>
+    <button class="btn primary" type="submit">Показать изменения</button>
+  </form>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Оплаты</h2></div>
+  <form class="panel fx-pay" id="fx-pay" data-season="{{ season.name }}">
+    <div class="fx-row">
+      <label>Кто платил <select name="payer" required>{% for c in customers %}<option value="{{ c.code }}">{{ c.code }}{{ ' (вы)' if c.is_owner else '' }}</option>{% endfor %}</select></label>
+      <label>Сумма € <input name="amount" required inputmode="decimal" size="9"></label>
+      <label>Куда <select name="to"><option value="factory">напрямую фабрике</option><option value="owner">вам</option></select></label>
+      <label>Статус <select name="confirmed"><option value="true">деньги поступили</option><option value="false">клиент только сообщил</option></select></label>
+      <label>Дата <input type="date" name="date" value="{{ today if today is defined else '' }}"></label>
+      <label>Номер/ссылка <input name="reference" size="12"></label>
+      <button class="btn primary" type="submit">Показать изменения</button>
+    </div>
+  </form>
+  <div class="table-frame"><table class="table">
+    <thead><tr><th>Дата</th><th>Кто</th><th>Куда</th><th class="num">Сумма</th><th>Статус</th><th>Ссылка</th><th></th></tr></thead>
+    <tbody>{% for p in ledger.payments %}<tr class="{{ '' if p.confirmed else 'muted' }}"><td>{{ p.date.strftime('%d.%m.%Y') if p.date else '' }}</td><td>{{ p.payer or '—' }}</td><td>{{ p.label }}</td>
+      <td class="num">{{ p.amount|money }}</td><td>{{ 'поступила' if p.confirmed else 'ожидается' }}</td><td>{{ p.reference or '' }}</td>
+      <td>{% if not p.confirmed %}<button class="btn sm" type="button" data-confirm-payment="{{ p.id[1:] }}">Деньги поступили</button>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="muted">Оплат пока нет.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
+<dialog class="fx-modal" id="fx-preview" aria-labelledby="fx-preview-title">
+  <h2 id="fx-preview-title">Проверьте изменения</h2>
+  <div data-preview-body></div>
+  <div class="form-actions"><button class="btn primary" type="button" data-preview-confirm>Сохранить</button><button class="btn quiet" type="button" data-preview-cancel>Отмена</button></div>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="/static/fx.js?v={{ asset_version() }}" defer></script>{% endblock %}

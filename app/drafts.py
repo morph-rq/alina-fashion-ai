@@ -265,7 +265,7 @@ def _row_identity(db: Session, row: DraftRow) -> tuple:
             _norm(value_of(row, "color", data)), _norm(value_of(row, "size", data)))
 
 
-def merge_extraction(db: Session, session: IntakeSession, bundle, sources_by_name: dict[str, int], fallback_sources: list[int]) -> list[DraftRow]:
+def merge_extraction(db: Session, session: IntakeSession, bundle, sources_by_name: dict[str, int], fallback_sources: list[int], *, merge_existing: bool = True) -> list[DraftRow]:
     """Turn an AI extraction bundle into draft rows, reinforcing matching rows instead of duplicating them."""
     touched = []
     for facts in bundle.orders:
@@ -307,7 +307,7 @@ def merge_extraction(db: Session, session: IntakeSession, bundle, sources_by_nam
         candidate = DraftRow(fields_json=json.dumps(data, default=str))
         identity = _row_identity(db, candidate)
         existing = next((row for row in active_rows(session) if row.kind == "new_item" and _row_identity(db, row) == identity
-                         and any(identity)), None)
+                         and any(identity)), None) if merge_existing else None
         if existing is None:
             touched.append(add_row(db, session, "new_item", data))
         else:

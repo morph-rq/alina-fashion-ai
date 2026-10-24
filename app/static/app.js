@@ -121,7 +121,7 @@
 
   /* File pickers: an English label and the chosen file names, whatever the browser's language. */
   $$('input[type=file]').forEach(input => {
-    if (input.classList.contains('sr-only-input') || input.closest('.image-dropzone, .composer-action')) return;
+    if (input.classList.contains("sr-only-input") || input.hidden || input.closest(".image-dropzone, .composer-action, .dock-settings")) return;
     const wrap = document.createElement('span');
     wrap.className = 'file-pick';
     input.parentNode.insertBefore(wrap, input);
@@ -167,7 +167,7 @@
     store.set('sessionStorage', 'ws-last', clean);
   }
   const lastWorksheet = store.get('sessionStorage', 'ws-last');
-  if (lastWorksheet && lastWorksheet.startsWith('/worksheet')) {
+  if (lastWorksheet && lastWorksheet.startsWith('/board')) {
     $$('a[data-workspace-link]').forEach(link => { link.href = lastWorksheet; });
   }
 

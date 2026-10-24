@@ -1,0 +1,68 @@
+{# Fashion AI: the command bar under the navigation on every page, and its dock (conversation + results). #}
+{% set cfg = copilot_config() %}
+<section class="copilot" id="copilot" data-state="idle" data-config='{{ cfg|tojson }}' aria-label="Fashion AI">
+  <div class="copilot-inner">
+    <form class="copilot-bar" id="copilot-form" autocomplete="off">
+      <span class="copilot-spark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9L12 2.5zM18.5 15l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6z"/></svg></span>
+      <button type="button" class="copilot-ctx" id="copilot-ctx" title="Что сейчас видит ассистент. Нажмите, чтобы спросить." aria-label="Что видит ассистент"><span class="copilot-eye" aria-hidden="true"></span><span data-ctx-text>…</span></button>
+      <label class="sr-only" for="copilot-input">Спросите Fashion AI</label>
+      <input id="copilot-input" type="text" enterkeyhint="send" placeholder="Спросите Fashion AI или перетащите файл…" aria-describedby="copilot-status-text">
+      <span class="copilot-status" id="copilot-status" aria-live="polite"><i aria-hidden="true"></i><span id="copilot-status-text"></span></span>
+      <button type="button" class="copilot-btn" id="copilot-attach" title="Прикрепить Excel или PDF" aria-label="Прикрепить файл"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg></button>
+      <button type="button" class="copilot-btn copilot-mic{% if not cfg.voice.configured %} is-off{% endif %}" id="copilot-mic" title="Говорить: удерживайте или нажмите (⌘⇧M). Esc — стоп." aria-label="Говорить">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0M12 17v4"/></svg>
+        <span class="copilot-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      </button>
+      <button type="button" class="copilot-btn copilot-stop" id="copilot-stop" title="Остановить (Esc)" aria-label="Остановить" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2"/></svg></button>
+      <button type="submit" class="copilot-send" id="copilot-send" aria-label="Отправить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+      <button type="button" class="copilot-btn copilot-expand" id="copilot-expand" title="Диалог и результаты (⌘J)" aria-label="Открыть диалог" aria-expanded="false" aria-controls="copilot-dock"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></svg><b class="copilot-badge" hidden></b></button>
+      <input type="file" id="copilot-file" multiple accept=".xlsx,.xlsm,.xls,.pdf" hidden>
+    </form>
+    <div class="copilot-under">
+      <div class="copilot-live" id="copilot-live" hidden><span class="copilot-live-final"></span><span class="copilot-live-partial"></span></div>
+      <p class="copilot-note" id="copilot-note" role="status" hidden></p>
+      <div class="copilot-share" id="copilot-share" hidden><span class="rec" aria-hidden="true"></span><span data-share-label>Окно показывается ассистенту</span><button type="button" class="linkish" data-share-frame>Спросить про это окно</button><button type="button" class="linkish" data-share-stop>Прекратить показ</button></div>
+      <div class="copilot-hint" id="copilot-hint" hidden><span data-hint-text></span><button type="button" class="linkish" data-hint-ask></button><button type="button" class="copilot-x" data-hint-close aria-label="Скрыть подсказку">×</button></div>
+    </div>
+    <div class="copilot-suggest" id="copilot-suggest" role="listbox" aria-label="Подсказки" hidden></div>
+  </div>
+</section>
+
+<aside class="dock" id="copilot-dock" aria-label="Диалог с Fashion AI" hidden>
+  <div class="dock-resize" data-resize title="Потяните, чтобы изменить ширину" aria-hidden="true"></div>
+  <header class="dock-head">
+    <strong>Fashion AI</strong>
+    <span class="dock-sub" data-dock-sub></span>
+    <div class="dock-tools">
+      <details class="dock-menu" data-history>
+        <summary title="Прошлые диалоги" aria-label="Прошлые диалоги"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6M3.5 4.5V9H8M12 7.5V12l3 2"/></svg></summary>
+        <div class="dock-pop" data-history-list><p class="muted">Загружаю…</p></div>
+      </details>
+      <button type="button" class="dock-icon" data-new-chat title="Новый диалог" aria-label="Новый диалог"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <details class="dock-menu">
+        <summary title="Голос и экран" aria-label="Голос и экран"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></summary>
+        <div class="dock-pop dock-settings">
+          <label class="fx-switch"><input type="checkbox" id="copilot-handsfree"> <span>Без рук (говорить без кнопки)</span></label>
+          <label class="fx-switch"><input type="checkbox" id="copilot-speak" checked> <span>Отвечать голосом</span></label>
+          <label class="fx-switch"><input type="checkbox" id="copilot-review"> <span>Показывать распознанный текст перед отправкой</span></label>
+          <label>Микрофон <select id="copilot-input-device"><option value="">По умолчанию</option></select></label>
+          <label>Вывод звука <select id="copilot-output-device"><option value="">По умолчанию</option></select></label>
+          <label>Громкость <input type="range" id="copilot-volume" min="0" max="1" step="0.05" value="1"></label>
+          <label>Голосовая заметка <input type="file" id="copilot-audio-file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.webm"></label>
+          <button type="button" class="btn sm" data-share-start>Показать окно Mac ассистенту…</button>
+          <p class="muted small">Показ окна начинается только по этой кнопке: macOS спросит, какое окно или экран показать. Остановить — «Прекратить показ».</p>
+          <a href="/settings/voice">Голос и модель ElevenLabs</a>
+        </div>
+      </details>
+      <button type="button" class="dock-icon" data-dock-close title="Свернуть (Esc)" aria-label="Свернуть диалог"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+  </header>
+  <div class="dock-body" id="copilot-messages" aria-live="polite"></div>
+  <footer class="dock-foot">
+    <div class="dock-hint" id="copilot-dock-hint" hidden><span data-hint-text></span><button type="button" class="linkish" data-hint-ask></button></div>
+    <div class="dock-pick" id="copilot-pick" hidden><span></span><button type="button" class="linkish" data-clear-pick>Снять</button></div>
+    <div class="dock-chips" id="copilot-chips"></div>
+  </footer>
+</aside>
+
+<div class="drop-veil" id="drop-veil" hidden><div><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 15v4a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 19v-4"/></svg><strong>Отпустите файл — Fashion AI прочитает его</strong><span>Excel (.xlsx, .xlsm, .xls) или PDF, можно несколько. В учёт ничего не попадёт без вашего подтверждения.</span></div></div>

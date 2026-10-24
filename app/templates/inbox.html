@@ -23,21 +23,20 @@
 
 <section class="composer" id="compose" aria-labelledby="compose-title">
   <h2 id="compose-title" style="margin-bottom:10px">New intake</h2>
-  {% if seasons %}
+  {% if request.query_params.get("error") %}<p class="notice danger" role="alert">{{ request.query_params.get("error") }}</p>{% endif %}
   <form action="/intake" method="post" enctype="multipart/form-data" data-once data-guard>
     <label class="sr-only" for="compose-message">Message</label>
     <textarea id="compose-message" name="message" rows="3" placeholder="Describe what happened, for example: Maria Ivanova, The Row, black coat, size 38, 1200 wholesale. Or attach photos, screenshots, PDFs, spreadsheets or voice notes."></textarea>
     <div class="composer-row">
-      <label class="season-pick"><span>Season</span><select name="season_id" required>{% for season in seasons %}<option value="{{ season.id }}">{{ season.name }}</option>{% endfor %}</select></label>
+      <label class="season-pick"><span>Season</span><select name="season_id"><option value="0">Automatic from file</option>{% for season in seasons %}<option value="{{ season.id }}">{{ season.name }}</option>{% endfor %}</select></label>
+      <label><span>Season name (optional)</span><input name="season_name" maxlength="40" placeholder="Auto-detect, e.g. SS27"></label>
       <label class="grow"><span class="sr-only">Title (optional)</span><input name="title" maxlength="200" placeholder="Title (optional), e.g. Maria — The Row coat"></label>
       <label><span class="sr-only">Attachments</span><input type="file" name="attachments" multiple accept="image/*,application/pdf,.xlsx,.xlsm,.csv,.txt,audio/*"></label>
       <button class="btn primary" type="submit">Start intake</button>
     </div>
     <p class="muted" style="font-size:12.5px;margin:8px 0 0">Files are stored and checksummed before anything reads them. Text inside documents is treated as evidence, never as instructions.{% if not ai_configured %} AI extraction is not configured here: sources are still stored and you fill the draft rows by hand.{% endif %}</p>
   </form>
-  {% else %}
-  <p class="muted">Create a season first; every intake belongs to one.</p><a class="btn" href="/manual-entry#new-season">Create a season</a>
-  {% endif %}
+  <p class="muted">Excel files up to 1 GB are supported. Upload your file: its season is detected from the filename or sheet names and created automatically. Review and edit the draft before saving.</p>
 </section>
 
 <div class="grid-2">

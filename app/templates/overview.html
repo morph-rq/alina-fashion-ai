@@ -7,7 +7,7 @@
     <h1>Overview</h1>
     <p class="page-sub">{% if data %}{{ season.name }}: {{ data.orders|length }} brand table{{ '' if data.orders|length == 1 else 's' }}, {{ tasks|length }} next action{{ '' if tasks|length == 1 else 's' }}.{% else %}Start by creating a season; everything else builds on it.{% endif %}</p>
   </div>
-  <div class="page-actions">{{ ui.season_select(seasons, season, action='/') }}</div>
+  <div class="page-actions"><button class="btn quiet" type="button" data-tour-start>Take the 2-minute tour</button>{{ ui.season_select(seasons, season, action='/') }}</div>
 </header>
 
 {% if not data %}

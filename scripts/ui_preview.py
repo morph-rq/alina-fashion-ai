@@ -2,6 +2,7 @@
 
     python scripts/ui_preview.py            # copy app/, seed once, serve 127.0.0.1:8001
     python scripts/ui_preview.py --reseed   # start again from fresh synthetic data
+    python scripts/ui_preview.py --port 8002   # when the real app already uses 8001
 
 The copy lives in tmp/ui-preview (its own database, uploads, reports and backups), so the
 testing copy's data folder is never touched. AI, image search, Google connections, the HTTP
@@ -142,6 +143,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--reseed", action="store_true", help="delete the preview data and seed again")
     parser.add_argument("--no-serve", action="store_true", help="prepare only")
+    parser.add_argument("--port", type=int, default=8001, help="port on 127.0.0.1 (use another one when 8001 is busy)")
     args = parser.parse_args()
     if args.reseed:
         for name in ("data", "backups"):
@@ -149,10 +151,11 @@ def main() -> None:
     PREVIEW.mkdir(parents=True, exist_ok=True)
     sync_code()
     configure_environment()
+    os.environ["FASHION_PUBLIC_BASE_URL"] = f"http://127.0.0.1:{args.port}"
     seed()
     if not args.no_serve:
         import uvicorn
-        uvicorn.run("app.main:app", host="127.0.0.1", port=8001)
+        uvicorn.run("app.main:app", host="127.0.0.1", port=args.port)
 
 
 if __name__ == "__main__":

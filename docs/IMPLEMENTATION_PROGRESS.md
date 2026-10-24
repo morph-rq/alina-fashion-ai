@@ -174,6 +174,18 @@ in-place edits.
   row → draft → created → edited the Phone cell (saved, survived reload); edited a size in the upload check; AI page
   and Tables view rendered. Not checked: a real Claude key (tested with a simulated API only).
 
+## Guided tour and localhost check (2026-10-24)
+
+* **Guide** button in the top bar, **Take the 2-minute tour** on Overview, or `?tour=1`: `app/static/tour.js`
+  highlights one part at a time (Overview, Workspace views, colours, cell editing, bulk marking, Excel, Tables,
+  Inbox, Customers, Settings, Claude) and moves between pages itself; arrow keys, Esc to end; docks above the tab bar
+  on phones. Read-only: it never changes data. `tests/test_tour.py` checks every step page loads.
+* `scripts/ui_preview.py --port N` runs the synthetic demo next to a real app that already uses 8001.
+* Localhost check on the synthetic demo (127.0.0.1:8011): all 54 GET pages requested; 52 returned 200 and the two
+  JSON helpers returned the expected 422 without query parameters; no server errors in the log. The tour was
+  walked on desktop and at phone width. The real testing app the user had running on 8001 answers 401 because a
+  login is configured in its `.env`; it was not stopped or changed.
+
 ## Remaining work and decisions
 
 * Connect a real Google account and verify Drive/Gmail end to end (needs the account owner).

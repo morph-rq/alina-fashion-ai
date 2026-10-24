@@ -27,6 +27,7 @@
           <summary class="btn primary" aria-haspopup="menu">{{ ui.icon('plus') }}Add</summary>
           <div class="menu-panel" role="menu">{{ ui.add_menu_items() }}</div>
         </details>
+        <button class="tool-btn" type="button" data-tour-start aria-label="Guide: a short tour of the app" title="Guide: a short tour of the app"><span class="guide-glyph" aria-hidden="true">?</span><span class="tool-label" aria-hidden="true">Guide</span></button>
         <a class="tool-btn" href="/settings" aria-label="Settings" title="Settings" {% if area == 'settings' %}aria-current="page"{% endif %}>{{ ui.icon('gear') }}</a>
       </div>
     </div>
@@ -63,6 +64,7 @@
   </dialog>
 
   <script src="/static/app.js?v={{ asset_version() }}" defer></script>
+  <script src="/static/tour.js?v={{ asset_version() }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

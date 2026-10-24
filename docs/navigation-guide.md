@@ -27,6 +27,11 @@ select products and **Mark as** a colour, and **Export check to Excel** or **Sav
 later through **Excel & statements › Check the last upload**. Shipment and expense amounts can be corrected in
 **Ready & shipping** with **Edit costs**.
 
+## Guide
+
+Press **Guide** (the **?** next to Settings) or **Take the 2-minute tour** on Overview. **Next** / **Back** (or the arrow
+keys) move through 15 steps across the app; **Esc** or **×** ends it. It only explains; it never changes anything.
+
 ## Tables and typing into cells
 
 **Workspace › Tables**: write what you need ("New season FW27 with brands Atelier Nord and Lumen, 30% markup" or

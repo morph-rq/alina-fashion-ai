@@ -46,6 +46,10 @@ computer, host it as described in [DEPLOYMENT.md](DEPLOYMENT.md) and set a login
 
 ## Start here (testing copy, updated 2026-10-24)
 
+- **New to the app?** Press **Guide** (the **?** at the top) or **Take the 2-minute tour** on Overview: 15 short
+  steps that highlight each part and move between pages by themselves. Any address with `?tour=1` starts it too.
+- **Demo with made-up data:** `scripts/ui_preview.py` (add `--port 8002` when the real app already uses 8001).
+
 - **Tables** (Workspace › Tables): describe a table in words — "New season FW27 with brands A and B, 30% markup"
   or "a table of suppliers with name, phone, email" — check the draft, create it, then type straight into the
   cells like Excel and download it as `.xlsx`.

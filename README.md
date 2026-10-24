@@ -29,7 +29,18 @@ A clean FastAPI/SQLite workspace for fashion orders, customer records, collectio
 6. **Optional:** Google Drive and Gmail — [docs/drive-gmail-setup.md](docs/drive-gmail-setup.md); backups —
    [docs/backup-restore.md](docs/backup-restore.md).
 
-To update later: `git pull`, then run `setup.ps1` again if `requirements.txt` changed. Your data stays in `data/`
+### On a Mac
+
+1. Install the tools once in Terminal: `xcode-select --install` (Git), then Python 3.12 from
+   [python.org](https://www.python.org/downloads/macos/) or `brew install python@3.12 gh`. Optional: `brew install uv`.
+2. Sign in and download: `gh auth login`, then
+   `cd ~/Documents && gh repo clone morph-rq/alina-fashion-local alina-fashion-app && cd alina-fashion-app`.
+3. Set up: `./setup.sh`. Start: `./scripts/run.sh`, then open <http://127.0.0.1:8001> (Ctrl+C stops it).
+4. For a demo with made-up records only (no real data on screen):
+   `.venv/bin/python scripts/ui_preview.py --reseed`, then open <http://127.0.0.1:8001>.
+5. Claude: **Settings › AI assistant**, as above. On a Mac the key is encrypted with a key file in `data/private`.
+
+To update later: `git pull`, then run `setup.ps1` / `./setup.sh` again if `requirements.txt` changed. Your data stays in `data/`
 (never uploaded to GitHub). GitHub stores the code only; it cannot run this app. To use it from a phone or another
 computer, host it as described in [DEPLOYMENT.md](DEPLOYMENT.md) and set a login password first.
 

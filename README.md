@@ -29,16 +29,23 @@ A clean FastAPI/SQLite workspace for fashion orders, customer records, collectio
 6. **Optional:** Google Drive and Gmail — [docs/drive-gmail-setup.md](docs/drive-gmail-setup.md); backups —
    [docs/backup-restore.md](docs/backup-restore.md).
 
-### On a Mac
+### On a Mac (MacBook)
 
-1. Install the tools once in Terminal: `xcode-select --install` (Git), then Python 3.12 from
-   [python.org](https://www.python.org/downloads/macos/) or `brew install python@3.12 gh`. Optional: `brew install uv`.
-2. Sign in and download: `gh auth login`, then
-   `cd ~/Documents && gh repo clone morph-rq/alina-fashion-local alina-fashion-app && cd alina-fashion-app`.
-3. Set up: `./setup.sh`. Start: `./scripts/run.sh`, then open <http://127.0.0.1:8001> (Ctrl+C stops it).
-4. For a demo with made-up records only (no real data on screen):
-   `.venv/bin/python scripts/ui_preview.py --reseed`, then open <http://127.0.0.1:8001>.
-5. Claude: **Settings › AI assistant**, as above. On a Mac the key is encrypted with a key file in `data/private`.
+1. **Access:** the repository is private. Sign in with the GitHub account that owns it (`morph-rq`), or have that
+   account add yours under *Settings › Collaborators* on github.com.
+2. **Tools (one time, in Terminal):** `xcode-select --install` (installs Git), then
+   `curl -LsSf https://astral.sh/uv/install.sh | sh` and open a new Terminal window. `uv` fetches Python 3.12 by
+   itself, so you do not need to install Python separately. With Homebrew instead: `brew install uv gh`.
+3. **Download**, either:
+   - with the GitHub CLI: `brew install gh`, `gh auth login`, then
+     `cd ~/Documents && gh repo clone morph-rq/alina-fashion-local alina-fashion-app && cd alina-fashion-app`; or
+   - in the browser: open the repository on github.com, **Code › Download ZIP**, double-click the ZIP in Downloads,
+     move the folder to Documents and in Terminal `cd ~/Documents/alina-fashion-local-master`.
+4. **Set up:** `bash setup.sh`. **Start:** `bash scripts/run.sh`, then open <http://127.0.0.1:8001> (Ctrl+C stops it).
+   If 8001 is busy: `PORT=8002 bash scripts/run.sh`.
+5. **Demo with made-up records only** (nothing real on screen): `.venv/bin/python scripts/ui_preview.py --reseed`.
+6. **Guide:** press **?** at the top, or open <http://127.0.0.1:8001/?tour=1>. **Claude:** Settings › AI assistant.
+   On a Mac the key is encrypted with a key file in `data/private`.
 
 To update later: `git pull`, then run `setup.ps1` / `./setup.sh` again if `requirements.txt` changed. Your data stays in `data/`
 (never uploaded to GitHub). GitHub stores the code only; it cannot run this app. To use it from a phone or another

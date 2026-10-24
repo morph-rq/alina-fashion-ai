@@ -49,6 +49,15 @@ SECTIONS = (
     (r"заказ|таблиц\w* заказ|доск", "/board", "Заказы"),
     (r"ассистент|чат", "/assistant", "Ассистент"),
 )
+def opened_speech(filters, count: int) -> str:
+    """ "Открываю Dior cruise, IDS: 3 позиции." — says what was opened, not just that something was."""
+    from app.voice import _plural
+    what = ", ".join([*filters.brands, *filters.customers]) or "выборку"
+    if not count:
+        return f"По запросу {what} позиций не нашла. Проверьте бренд или клиента."
+    return f"Открываю {what}: {count} {_plural(count, 'позиция', 'позиции', 'позиций')}."
+
+
 OPEN = re.compile(r"^\s*(открой|перейди|покажи|зайди|давай|переключи|верни\w*|иди|пойд[её]м|открыть)\b", re.I)
 
 
@@ -191,6 +200,10 @@ def conversation_payload(db: Session, conversation: str) -> dict:
                 entry["proposal"] = proposals.get(proposal["id"], proposal)
             if data.get("question"):
                 entry["question"] = data["question"]
+            if data.get("steps"):
+                entry["steps"] = data["steps"]
+            if data.get("panel"):
+                entry["panel"] = data["panel"]
         messages.append(entry)
     panel = next((json.loads(r.data_json or "{}").get("panel") for r in reversed(rows)
                   if r.role == "assistant" and json.loads(r.data_json or "{}").get("panel")), None)
@@ -273,6 +286,15 @@ def attachment_turn(db: Session, conversation: str, token: str) -> dict:
     if analysis is None:
         return {"reply": f"«{name}»: {status.get('message') or 'файл ещё не прочитан'}", "context": memory_update}
     _index_later(status.get("workbook"))
+    from app.models import ImportBatch
+    same = db.scalar(select(ImportBatch).where(ImportBatch.sha256 == analysis.sha256))
+    if same is not None:            # byte-for-byte the file already imported: nothing to compare or merge
+        when = same.imported_at.strftime("%d.%m.%Y %H:%M") if getattr(same, "imported_at", None) else "раньше"
+        memory_update["attachment"].update(kind="xlsx", season=analysis.season, workbook_source=f"batch:{same.id}", already=True)
+        return {"reply": f"«{name}» — это тот же файл, что уже загружен ({when}, «{same.filename}»). Новых изменений в нём нет, ничего не меняю.\n"
+                         "Если фабрика прислала новую версию, перетащите её — я сравню и покажу, что изменилось. "
+                         "Можно и посмотреть этот файл: «Какие листы в файле?», «Покажи строки 1–40».",
+                "context": memory_update, "panel": None, "speech": "Этот файл уже загружен, нового в нём нет."}
     from app.revision import known_customers
     known = known_customers(db)
     orders = [s for s in analysis.sheets if s.kind == "order"]
@@ -289,7 +311,7 @@ def attachment_turn(db: Session, conversation: str, token: str) -> dict:
     if unclear:
         findings.append(f"{unclear} строк(и) без понятного клиента.")
     if unknown:
-        findings.append("Новые обозначения клиентов: " + ", ".join(unknown[:10]) + ".")
+        findings.append("Возможно, новые клиенты (проверьте — это могут быть и слова из описания): " + ", ".join(unknown[:10]) + ".")
     findings += analysis.warnings[:4]
     if findings:
         lines.append("Заметила:\n" + "\n".join(f"• {f}" for f in findings))
@@ -326,6 +348,8 @@ def install_copilot(app, templates, context, get_db):
         return {"voice": {k: voice.get(k) for k in ("configured", "speak_replies", "review_before_send")},
                 "ai": bool(settings.active_ai_api_key)}
     templates.env.globals["copilot_config"] = copilot_config
+    from app.assistant_flow import fill_meaning
+    templates.env.globals["fill_meaning"] = fill_meaning
 
     def _conversation(value) -> str:
         value = str(value or "")
@@ -443,6 +467,44 @@ def install_copilot(app, templates, context, get_db):
         kind = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}.get(part.rsplit(".", 1)[-1].lower())
         return Response(data, media_type=kind or "application/octet-stream")
 
+    @app.get("/api/inspect/image")
+    def inspect_image(source: str, part: str, db: Session = Depends(get_db)):
+        """One photo from a factory workbook, read straight from the file (nothing extracted to disk)."""
+        import zipfile
+        from fastapi.responses import Response
+        from app import workbook_inspect as wi
+        from app.xlsx_stream import read_media
+        if not part.startswith("xl/media/"):
+            raise HTTPException(404)
+        try:
+            path, _ = wi.resolve(db, source)
+        except wi.InspectError:
+            raise HTTPException(404) from None
+        with zipfile.ZipFile(path) as archive:
+            data = read_media(archive, part)
+        if data is None:
+            raise HTTPException(404)
+        kind = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"}.get(part.rsplit(".", 1)[-1].lower())
+        return Response(data, media_type=kind or "application/octet-stream", headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.get("/documents/{doc_id}/images")
+    def document_images(doc_id: int, db: Session = Depends(get_db)):
+        """The photos inside a generated Excel file, in sheet/row order — shown as a strip in the assistant."""
+        import zipfile
+        from app import xlsx_stream
+        from app.config import ROOT_DIR
+        doc = db.get(GeneratedDocument, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        path = (ROOT_DIR / doc.stored_path).resolve()
+        if path.suffix.lower() not in (".xlsx", ".xlsm") or not path.exists() or not path.is_relative_to((ROOT_DIR / "data").resolve()):
+            return JSONResponse({"images": [], "total": 0})
+        with zipfile.ZipFile(path) as archive:
+            anchors = [(name, a) for name, part in xlsx_stream.sheet_parts(archive) for a in xlsx_stream.image_anchors(archive, part)]
+        anchors.sort(key=lambda x: (x[0], x[1].row))
+        return JSONResponse({"total": len(anchors), "images": [
+            {"url": f"/documents/{doc_id}/image?{urlencode({'part': a.media})}", "sheet": name, "row": a.row} for name, a in anchors[:40]]})
+
     @app.get("/api/inspect/rows")
     def inspect_rows(source: str, sheet: str = "", start: int = 1, end: int = 0, db: Session = Depends(get_db)):
         from app import workbook_inspect as wi
@@ -509,6 +571,9 @@ class CopilotMixin:
                 season = None
         previous = sel.Filters.from_dict(self.memory["selection"]) if self.memory.get("selection") else None
         filters, question, changed = sel.parse(self.db, text, previous, self.screen)
+        if re.search(r"\bвсе\s+(её\s+|его\s+)?(заказ|позици|вещи)", lowered) and "customers" in changed and "brands" not in changed \
+                and not (previous and previous.brands):
+            filters.brands = []          # "все заказы AA" on some brand's page: every brand (a brand chosen in the dialog stays)
         names_scope = bool(changed & {"brands", "customers"})
         section = section_for(text)
         if question and not section:
@@ -527,9 +592,16 @@ class CopilotMixin:
             table = sel.selection_table(selection)
             count = len(selection.items)
             reply = f"{selection.summary}. Открываю." if count else f"{selection.summary}. Позиции не найдены — проверьте бренд или клиента."
+            elsewhere = ""
+            if not count and len(filters.customers) == 1 and filters.brands:
+                from app.agent import _customer_brands
+                found = _customer_brands(self.db, {"customer": filters.customers[0], "season": selection.season.name if selection.season else season})
+                if found:
+                    elsewhere = f"У {filters.customers[0]} есть позиции в: " + ", ".join(f"{b} ({n})" for b, n in found.items()) + "."
+                    reply += "\n" + elsewhere
             context = self.context_from(selection)
             return self.done(reply, None, context, panel={"selection": table}, client={"navigate": url},
-                             speech=f"Открываю. {count} позиций." if count else "Ничего не нашла.")
+                             speech=opened_speech(filters, count) + (" " + elsewhere if elsewhere else ""))
         if section:
             url, label = section
             if url in ("/board", "/factories", "/pricing", "/documents") and season:
@@ -552,8 +624,12 @@ class CopilotMixin:
         create = re.search(r"созда\w* (их|новых|клиент)|нов\w* клиент|добав\w* (их|новых) клиент", lowered)
         skip = re.search(r"без клиента|оставь (без|пуст)|разбер\w* потом|не созда", lowered)
         cancel_missing = re.search(r"отмени\w* (те, )?(которых|чего|отсутству)|(нет|пропал\w*) .*отмени|отмени .*нет в файле", lowered)
-        if not (merge or new_season or create or skip or cancel_missing):
+        not_owner = re.search(r"владел\w* не\b|\bне владел", lowered)
+        if not (merge or new_season or create or skip or cancel_missing or not_owner):
             return None
+        if attachment.get("already"):
+            return self.done("Этот файл уже загружен целиком — добавлять нечего, ничего не изменено. Новую версию от фабрики перетащите сюда.",
+                             None, self.memory, speech="Этот файл уже загружен, добавлять нечего.")
         analysis = load_analysis(token)
         if analysis is None:
             return self.done("Файл ещё читается — подождите несколько секунд.", None, self.memory)
@@ -569,6 +645,13 @@ class CopilotMixin:
             return self.done("В файле не указан сезон. Для какого сезона?", {"question": "Какой сезон?", "options": [
                 s.name for s in self.db.scalars(select(Season).order_by(Season.id.desc()).limit(4))]}, self.memory)
         options = dict(attachment.get("options") or {})
+        first_import = self.db.scalar(select(func.count()).select_from(Customer)) == 0
+        if first_import and "create_unknown" not in options:
+            options["create_unknown"] = True          # an empty app: the codes in the file are the customers
+        if not_owner:
+            options["owner"] = ""
+        if first_import and "owner" not in options and "ALINA" in {t.upper() for t in analysis.tokens}:
+            options["owner"] = "ALINA"                # the owner's own items are at factory price (no markup, no deposit)
         if create:
             options["create_unknown"] = True
         if skip:
@@ -601,9 +684,16 @@ class CopilotMixin:
             will_do.append(f"{len(diff['unresolved_new'])} строк(и) без понятного клиента — добавлю на проверку (без клиента).")
         if diff["missing"] and not options.get("cancel_missing"):
             will_do.append(f"{len(diff['missing'])} позиций нет в новом файле — оставляю как есть (скажите «отмени те, которых нет в файле»).")
-        if diff["unknown_customers"]:
+        known = revision.known_customers(self.db)
+        new_codes = sorted(set(diff["unknown_customers"]) | ({t for t, n in analysis.tokens.items() if n and t.upper() not in known}
+                                                              if options.get("create_unknown") else set()))
+        if new_codes:
+            twins = revision.spelling_twins(new_codes) if options.get("create_unknown") else {}
+            created = [t for t in new_codes if t not in twins]
             will_do.append(("Новые клиенты будут созданы: " if options.get("create_unknown") else "Без клиента останутся строки с новыми обозначениями: ")
-                           + ", ".join(diff["unknown_customers"]))
+                           + ", ".join(created) + (" (" + ", ".join(f"{a} = {b}" for a, b in twins.items()) + " — одна клиентка, два написания)" if twins else ""))
+        if options.get("owner"):
+            will_do.append(f"{options['owner']} — это вы (владелица): ваши вещи по цене фабрики, без наценки и предоплаты. Если нет — скажите «владелица не {options['owner']}».")
         if re.search(r"раздел|\d\s?%|предоплат|excel|эксел|pdf|пдф|документ", lowered):
             self.queue_text = text          # the rest of a multi-step request runs after the import is confirmed
         self.pending.summary = f"Файл {analysis.filename} → {season_name}"
@@ -616,9 +706,12 @@ class CopilotMixin:
         if diff["unknown_customers"] and "create_unknown" not in options:
             question = {"question": "Новые обозначения клиентов: " + ", ".join(diff["unknown_customers"][:8]) + ". Что с ними?",
                         "options": ["Создай новых клиентов", "Оставь без клиента"]}
+        from app.voice import _plural
         count = len(diff["new"]) + len(diff["changed"]) + len(diff["cancelled"])
+        parts = ([f"{len(diff['new_orders'])} {_plural(len(diff['new_orders']), 'новый заказ', 'новых заказа', 'новых заказов')}"] if diff["new_orders"] else []) + \
+            ([f"{count} {_plural(count, 'изменение', 'изменения', 'изменений')} в позициях"] if count else [])
         return self.done(reply, question, context, panel=panel,
-                         speech=f"Сравнила файл. Изменений: {count}. Проверьте список на экране и подтвердите кнопкой.")
+                         speech=f"Сравнила файл: {', '.join(parts) or 'изменений нет'}. Проверьте список на экране и подтвердите кнопкой.")
 
     # --- exact workbook inspection ------------------------------------------------------------------
     def inspect(self, text: str):
@@ -672,11 +765,15 @@ class CopilotMixin:
                 reply += f" Показываю по {wi.MAX_ROWS} строк — скажите «дальше»."
             return self.done(reply, None, {**context, "inspect": {"source": source_ref, "sheet": page["sheet"], "next": page["next_start"]}},
                              panel={"table": {"title": f"{page['sheet'].strip()} · строки {page['start']}–{page['end']}", "columns": ["№"] + letters,
-                                              "rows": rows, "grid": True}}, speech="Показала строки на экране.")
+                                              "rows": rows, "grid": True,
+                                              "images": {i: [f"/api/inspect/image?{urlencode({'source': source_ref, 'part': part})}" for part in r["photos"][:3]]
+                                                         for i, r in enumerate(page["rows"]) if r.get("photos")}}},
+                             speech="Показала строки на экране.")
         rows = [[s["name"].strip(), str(s["rows"]), s["last_column"], str(s["cells"]), str(s["photos"])] for s in outline["sheets"]]
-        reply = f"«{filename}»: {len(rows)} лист(ов). Могу показать любые строки («покажи строки 1–40 листа …») или найти значение («найди 711R07 в файле»)."
+        from app.voice import _plural
+        reply = f"«{filename}»: {len(rows)} {_plural(len(rows), 'лист', 'листа', 'листов')}. Могу показать любые строки («покажи строки 1–40 листа …») или найти значение («найди 711R07 в файле»)."
         return self.done(reply, None, context, panel={"table": {"title": filename, "columns": ["Лист", "Строк", "До колонки", "Ячеек", "Фото"], "rows": rows}},
-                         speech=f"В файле {len(rows)} листов. Список на экране.")
+                         speech=f"В файле {len(rows)} {_plural(len(rows), 'лист', 'листа', 'листов')}. Список на экране.")
 
     # --- every customer's deposit ---------------------------------------------------------------------
     def deposit_table(self, text: str):

@@ -71,7 +71,12 @@ NOT_CUSTOMER = {"ok", "no", "yes", "black", "white", "blue", "red", "pink", "bei
                 "bags", "bag", "acc", "rtw", "look", "size", "total", "ready", "sped", "new", "sale", "changed",
                 "comission", "commission", "the", "and", "with", "for", "milk", "silver", "cream", "olive", "khaki",
                 "nero", "foto", "price", "qty", "sku", "eur", "euro", "tbc", "cancelled", "canceled", "cancel", "arrived",
-                "delivered", "not", "pcs", "psc", "pc", "shipped", "sped", "spedito", "paid", "x", "or", "only"}
+                "delivered", "not", "pcs", "psc", "pc", "shipped", "sped", "spedito", "paid", "x", "or", "only",
+                # garments and colours that customer reports (SS24 "Отчет_" files) write next to sizes
+                "belt", "dress", "shirt", "skirt", "coat", "jacket", "pants", "pant", "trousers", "top", "knit", "sweater",
+                "cardigan", "scarf", "shoes", "boots", "sneakers", "hat", "cap", "tshirt", "t-shirt", "jeans", "shorts", "blouse",
+                "melange", "nougat", "snow", "navy", "camel", "brown", "ivory", "ecru", "sand", "taupe", "gold", "bordeaux",
+                "burgundy", "orange", "yellow", "purple", "multi", "multicolor", "natural", "off", "dark", "light"}
 STATUS_WORDS = {"CANCELLED": "Cancelled", "CANCELED": "Cancelled", "ОТМЕНА": "Cancelled", "DELIVERED": "Delivered",
                 "ARRIVED": "Arrived", "READY": "Ready", "ГОТОВО": "Ready"}
 
@@ -364,12 +369,23 @@ def _fills(path: Path, sheet: str, rows: set[int], cols: list[int]) -> dict[int,
     try:
         palette = theme_palette(book)
         worksheet = book[sheet]
+        anywhere: dict[int, Counter] = {}
         for row in worksheet.iter_rows(min_row=min(rows), max_row=max(rows)):
             for cell in row:
-                if getattr(cell, "row", None) in rows and getattr(cell, "column", None) in cols and cell.fill.patternType == "solid":
-                    colour = css_color(cell.fill.fgColor, palette)
-                    if colour and colour not in ("#FFFFFF", "#000000"):
-                        result.setdefault(cell.row, colour)
+                if getattr(cell, "row", None) not in rows or getattr(cell, "fill", None) is None or cell.fill.patternType != "solid":
+                    continue
+                colour = css_color(cell.fill.fgColor, palette)
+                if not colour or colour in ("#FFFFFF", "#000000"):
+                    continue
+                if getattr(cell, "column", None) in cols:
+                    result.setdefault(cell.row, colour)
+                anywhere.setdefault(cell.row, Counter())[colour] += 1
+        # A whole coloured row (six or more cells) is a mark on the item even when the name cell is plain.
+        # Smaller blocks elsewhere are layout — e.g. Celine shades the size grid that applies — not a status.
+        for number, counts in anywhere.items():
+            colour, n = counts.most_common(1)[0]
+            if n >= 6:
+                result.setdefault(number, colour)
     except Exception:  # noqa: BLE001 - formatting is optional evidence
         return result
     finally:

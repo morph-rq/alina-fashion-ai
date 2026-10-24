@@ -54,7 +54,7 @@
     <th>Статус</th><th>Источник</th>
   </tr></thead>
   <tbody>{% for i in rows %}{% set a = amounts[i.id] %}
-    <tr data-item="{{ i.id }}" class="fx-st-{{ i.status|lower|replace(' ', '-') }}{{ ' fx-unclear' if not i.customer_id else '' }}">
+    <tr data-item="{{ i.id }}" class="fx-st-{{ i.status|lower|replace(' ', '-') }}{{ ' fx-unclear' if not i.customer_id else '' }}{{ ' has-src-fill' if i.source_fill else '' }}"{% if i.source_fill %} style="--src-fill: {{ i.source_fill }}" title="Строка окрашена в файле фабрики"{% endif %}>
       <td class="fx-sticky-col"><input type="checkbox" data-select value="{{ i.id }}" aria-label="Выбрать"></td>
       <td class="fx-sticky-col2">{% if i.image_path %}<img class="fx-thumb" loading="lazy" alt="" src="{{ i.image_path|media_url }}">{% endif %}</td>
       <td><strong>{{ i.name or '—' }}</strong><br><small class="muted">{{ i.article or '' }}</small></td>
@@ -70,7 +70,7 @@
       <td class="num" data-edit="price" data-item="{{ i.id }}" tabindex="0">{% if i.selling_unit_price is not none %}<strong>{{ i.selling_unit_price|moneynb }}</strong> ✎{% else %}<span class="fx-calc">{{ (a.final / i.quantity if i.quantity else a.final)|moneynb }}</span>{% endif %}</td>
       <td class="num fx-calc"><strong>{{ a.final|moneynb }}</strong></td>
       <td data-edit="status" data-item="{{ i.id }}" data-status="{{ i.status }}" data-options="{% for st in statuses %}{{ st }}|{{ status_ru[st] }}{{ ',' if not loop.last }}{% endfor %}" tabindex="0"><span class="fx-status fx-status-{{ i.status|lower|replace(' ', '-') }}">{{ status_ru.get(i.status, i.status) }}</span>{% if i.cancel_reason %}<br><small class="muted">{{ i.cancel_reason }}</small>{% endif %}</td>
-      <td><small class="muted" title="{{ i.source_file or '' }}">{{ i.source_sheet or '' }} {{ i.source_cell or i.source_row or '' }}</small>{% if i.source_fill %} <span class="fx-swatch" style="background:{{ i.source_fill }}" title="Цвет ячейки в файле фабрики"></span>{% endif %}</td>
+      <td><small class="muted" title="{{ i.source_file or '' }}">{{ i.source_sheet or '' }} {{ i.source_cell or i.source_row or '' }}</small>{% if i.source_fill %} <span class="fx-swatch" style="background:{{ i.source_fill }}" title="Цвет строки в файле фабрики: {{ i.source_fill }}{{ ' — ' ~ fill_meaning(i.source_fill) if fill_meaning(i.source_fill) else '' }}"></span>{% endif %}</td>
     </tr>{% endfor %}</tbody>
 </table>
 </div>

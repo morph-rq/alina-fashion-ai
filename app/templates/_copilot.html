@@ -62,6 +62,15 @@
     <div class="dock-hint" id="copilot-dock-hint" hidden><span data-hint-text></span><button type="button" class="linkish" data-hint-ask></button></div>
     <div class="dock-pick" id="copilot-pick" hidden><span></span><button type="button" class="linkish" data-clear-pick>Снять</button></div>
     <div class="dock-chips" id="copilot-chips"></div>
+    <form class="dock-compose" id="copilot-dock-form" autocomplete="off">
+      <label class="sr-only" for="copilot-dock-input">Сообщение для Fashion AI</label>
+      <textarea id="copilot-dock-input" rows="1" placeholder="Напишите или скажите… (Enter — отправить, Shift+Enter — новая строка)"></textarea>
+      <div class="dock-compose-tools">
+        <button type="button" class="copilot-btn" data-dock-attach title="Прикрепить Excel или PDF" aria-label="Прикрепить файл"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.1 8.1a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg></button>
+        <button type="button" class="copilot-btn{% if not cfg.voice.configured %} is-off{% endif %}" data-dock-mic title="Сказать (⌘⇧M)" aria-label="Говорить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0M12 17v4"/></svg></button>
+        <button type="submit" class="copilot-send" aria-label="Отправить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+      </div>
+    </form>
   </footer>
 </aside>
 

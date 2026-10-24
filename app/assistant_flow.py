@@ -459,12 +459,21 @@ def intercept(db: Session, conversation: str, text: str, screen: dict, channel: 
         client = {"navigate": result["navigate"]} if result.get("navigate") else None
         if result.get("follow_up"):
             client = (client or {}) | {"follow_up": result["follow_up"]}
+        # Spoken: what is now saved (the customers' own new figures), not only "saved".
+        own = [r for r in view.get("diff", []) if re.match(r"(Заказ \S+|\S+: предоплата)$", r["label"])][:4]
+        saved = "; ".join(f"{r['label']} теперь {eur(r['after'])}" for r in own)
         return TurnResult(reply, proposal=view, data=memory | {"last_committed": pending.public_id}, client=client,
-                          speech="Сохранила." + (" Можно отменить фразой «отмени последнее изменение»." if json.loads(pending.result_json or "{}").get("undo") else ""))
+                          speech=f"Сохранила: {pending.summary}." + (f" {saved}." if saved else "")
+                          + (" Отменить — «отмени последнее изменение»." if json.loads(pending.result_json or "{}").get("undo") else ""))
     if REJECT.search(lowered):
         rest = REJECT.sub("", text, count=1).strip(" ,.!—-")
         pending.status, pending.decided_at = "cancelled", datetime.now(timezone.utc)
         db.commit()
+        swap = re.search(r"\bне\s+([A-Za-zА-Яа-яЁё]{2,})\s*,?\s*а\s+([A-Za-zА-Яа-яЁё]{2,})", rest, re.I)
+        if swap:            # "Стоп, не IDS, а AA" — the same change for the other customer
+            swapped = swap_customer(db, conversation, pending, swap.group(1), swap.group(2), memory)
+            if swapped is not None:
+                return swapped
         if rest and re.search(r"\d", rest):
             corrected = correct_markups(db, conversation, pending, rest, memory)
             if corrected is not None:
@@ -489,9 +498,16 @@ def correct_markups(db: Session, conversation: str, cancelled: AgentProposal, re
         return None
     found = sel.customers_in(db, rest)
     number = re.search(r"(\d{1,2}(?:[.,]\d+)?)\s?%?", rest)
-    if not isinstance(found, list) or len(found) != 1 or not number:
+    own = {a["params"].get("customer", "").upper() for a in actions}
+    if isinstance(found, list) and not found and len(own) == 1:
+        code = own.pop()            # "Нет, лучше 35" — the customer of the proposal being corrected
+    elif isinstance(found, list) and len(found) == 1:
+        code = found[0].code
+    else:
         return None
-    code, value = found[0].code, number.group(1).replace(",", ".")
+    if not number:
+        return None
+    value = number.group(1).replace(",", ".")
     changed = False
     for action in actions:
         if action["params"].get("customer", "").upper() == code.upper():
@@ -506,12 +522,49 @@ def correct_markups(db: Session, conversation: str, cancelled: AgentProposal, re
                                            "actions": actions}, pending)
     if "error" in out:
         return TurnResult(out["error"], data=memory)
+    if out.get("no_change"):
+        from app.agent import no_change_reply
+        return TurnResult(no_change_reply(out), data=memory, speech=no_change_reply(out))
     proposal = _store_proposal(db, rest, pending, conversation)
     lines = [f"• {l}" for l in out.get("will_do", [])]
     impact = [f"{r['label']}: {eur(r['before'])} → {eur(r['after'])}" for r in out.get("financial_impact", [])]
     reply = "Исправила предложение:\n" + "\n".join(lines) + ("\n\nВлияние на суммы:\n" + "\n".join(impact) if impact else "") + "\n\nСохранить?"
-    return TurnResult(reply, proposal=proposal, data=memory, speech="Исправила. " + "; ".join(
-        f"{a['params']['customer']} {a['params']['markup']}%" for a in actions) + ". Сохранить?")
+    own_rows = [r for r in out.get("financial_impact", []) if re.match(r"(Заказ \S+|\S+: предоплата)$", r["label"])][:4]
+    return TurnResult(reply, proposal=proposal, data=memory, speech="Исправила: " + "; ".join(
+        f"{a['params']['customer']} {a['params']['markup']}%" for a in actions) + ". "
+        + "; ".join(f"{r['label']}: было {eur(r['before'])}, станет {eur(r['after'])}" for r in own_rows) + ". Сохранить?")
+
+
+def swap_customer(db: Session, conversation: str, cancelled: AgentProposal, wrong: str, right: str, memory: dict):
+    from app.agent import TurnResult, _Pending, _store_proposal, run_tool
+    try:
+        old, new = la.find_customer(db, wrong).code, la.find_customer(db, right).code
+    except la.ActionError:
+        return None
+    plan = json.loads(cancelled.actions_json or "{}")
+    actions = plan.get("actions", [])
+    if not actions or not any(a.get("params", {}).get("customer", "").upper() == old.upper() for a in actions):
+        return None
+    for a in actions:
+        if a.get("params", {}).get("customer", "").upper() == old.upper():
+            a["params"]["customer"] = new
+    pending = _Pending()
+    out = run_tool(db, "propose_changes", {"summary": (cancelled.summary or "").replace(old, new) or f"Изменение для {new}", "actions": actions}, pending)
+    if "error" in out:
+        return TurnResult(out["error"], data=memory)
+    if out.get("no_change"):
+        from app.agent import no_change_reply
+        return TurnResult(f"Для {old} ничего не меняю. " + no_change_reply(out), data=memory, speech=f"Для {old} отменила. " + no_change_reply(out))
+    for spec in plan.get("documents", []):
+        if spec.get("customer", "").upper() == old.upper():
+            pending.documents.append(spec | {"customer": new})
+    proposal = _store_proposal(db, f"не {old}, а {new}", pending, conversation)
+    impact = [f"{r['label']}: {eur(r['before'])} → {eur(r['after'])}" for r in out.get("financial_impact", [])]
+    own = [r for r in out.get("financial_impact", []) if re.match(rf"(Заказ {new}|{new}: предоплата)$", r["label"])]
+    return TurnResult(f"Поняла: не {old}, а {new}. Для {old} ничего не меняю.\n" + "\n".join(f"• {l}" for l in out.get("will_do", []))
+                      + ("\n\nВлияние на суммы:\n" + "\n".join(impact) if impact else "") + "\n\nСохранить?",
+                      proposal=proposal, data=memory | {"customer": new},
+                      speech=f"Поняла, {new}. " + "; ".join(f"{r['label']}: было {eur(r['before'])}, станет {eur(r['after'])}" for r in own) + ". Сохранить?")
 
 
 def undo_last(db: Session, conversation: str, memory: dict):

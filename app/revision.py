@@ -193,9 +193,24 @@ def update_actions(diff: dict, filename: str, cancel_missing: bool = False) -> l
     return actions
 
 
-def import_decisions(diff: dict, analysis: Analysis, create_unknown: bool) -> dict:
+def spelling_twins(tokens: list[str], known: set[str] = frozenset()) -> dict[str, str]:
+    """ "НАТАЛЬЯ" → "NATALYA" when both spellings are in the file (or the Latin one is already a customer)."""
+    from app.factory_import import TRANSLIT
+    latin = {t.upper() for t in tokens if re.fullmatch(r"[A-Za-z0-9]+", t)} | {k.upper() for k in known}
+    twins = {}
+    for t in tokens:
+        if re.search(r"[А-Яа-яЁё]", t):
+            spelled = "".join(TRANSLIT.get(ch, ch) for ch in t.upper())
+            if spelled in latin:
+                twins[t] = spelled
+    return twins
+
+
+def import_decisions(diff: dict, analysis: Analysis, create_unknown: bool, owner: str | None = None) -> dict:
     """``commit_import`` decisions that create only the new allocations (and whole new orders)."""
     token_map = {t: ("new" if create_unknown else "skip") for t in diff["unknown_customers"]}
+    if create_unknown:          # one customer, the other spelling an alias
+        token_map.update(spelling_twins(sorted(set(diff["unknown_customers"]) | {t for t, n in analysis.tokens.items() if n})))
     row_units: dict[str, list[dict]] = defaultdict(list)
     for row in diff["new"]:
         customer = row["key"][3]
@@ -209,11 +224,11 @@ def import_decisions(diff: dict, analysis: Analysis, create_unknown: bool) -> di
     only_rows = set(row_units) | set(diff.get("unresolved_new") or []) | \
         {f"{s.name}:{i.row}" for s in analysis.sheets if s.name in new_sheets for i in s.items}
     return {"season": diff["season"], "token_map": token_map, "row_units": dict(row_units), "only_rows": sorted(only_rows),
-            "keep_existing_terms": True, "rates_confirmed": False}
+            "keep_existing_terms": True, "rates_confirmed": False, **({"owner": owner} if owner else {})}
 
 
 def apply(db: Session, analysis: Analysis, original, diff: dict, *, create_unknown: bool = False,
-          cancel_missing: bool = False, actor: str = "assistant") -> dict:
+          cancel_missing: bool = False, actor: str = "assistant", owner: str | None = None) -> dict:
     from app import factory_import, ledger_actions as la
     from app.models import ImportBatch
     if db.scalar(select(ImportBatch).where(ImportBatch.sha256 == analysis.sha256)) is not None:
@@ -222,7 +237,7 @@ def apply(db: Session, analysis: Analysis, original, diff: dict, *, create_unkno
     actions = update_actions(diff, analysis.filename, cancel_missing)
     if actions:
         messages += la.commit_actions(db, actions, actor, f"Обновление по файлу {analysis.filename}"[:300])
-    decisions = import_decisions(diff, analysis, create_unknown)
+    decisions = import_decisions(diff, analysis, create_unknown, owner)
     result = factory_import.commit_import(db, analysis, original, decisions, actor=actor)
     messages.append(f"Добавлено строк: {result.get('created', 0)}; на проверку: {result.get('review', 0)}.")
     return {"duplicate": False, "messages": messages, **result}

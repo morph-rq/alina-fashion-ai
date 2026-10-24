@@ -437,12 +437,19 @@ def install_factory(app, templates, context):
                                              None, channel, (str(body.get("raw"))[:6000] if body.get("raw") else None))
         except ValueError as exc:
             return JSONResponse({"reply": str(exc), "error": True, "speech": str(exc)})
+        except Exception:       # never a bare 500 in the dialog: say what happened and keep the conversation usable
+            import logging
+            logging.getLogger(__name__).exception("assistant turn failed")
+            db.rollback()
+            return JSONResponse({"reply": "Не получилось выполнить запрос — ничего не изменено. Попробуйте ещё раз или скажите иначе.",
+                                 "error": True, "retry": True, "speech": "Не получилось. Ничего не изменено, попробуйте ещё раз."})
         from app.voice import to_speech
         codes = [c.code for c in db.scalars(select(Customer))]
         return JSONResponse({"reply": result.reply, "proposal": result.proposal, "question": result.question,
                              "panel": result.panel, "speech": to_speech(result.speech or result.reply, codes),
                              "selection": (result.data or {}).get("selection"), "client": result.client,
-                             "tools": [c["name"] for c in result.tool_calls]}, headers={"Cache-Control": "no-store"})
+                             "tools": [c["name"] for c in result.tool_calls], "steps": agent.describe_steps(result.tool_calls)},
+                            headers={"Cache-Control": "no-store"})
 
     @app.post("/api/agent/proposals/{public_id}/commit")
     def agent_commit(public_id: str, db: Session = Depends(get_db)):

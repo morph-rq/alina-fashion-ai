@@ -55,7 +55,7 @@ article, price range, markup, source sheet and rows, unpaid. Every answer states
   ("Клиент · цена", "Клиент · сумма") on the selected rows. Photos, formulas, formatting and other sheets stay.
 - Several files → "Скачать всё (ZIP)". Files are previews; nothing is sent to anyone.
 
-## Voice (app/voice.py, app/static/assistant.js)
+## Voice (app/voice.py, app/static/copilot.js)
 
 Mac microphone → browser (AudioWorklet, 16 kHz PCM) → ElevenLabs **Scribe v2 Realtime** over a WebSocket
 authorised by a server-issued **single-use token** (15 min, used once) → transcript normalised
@@ -134,6 +134,26 @@ dialogues, ＋ starts a new one. ⌘J / Ctrl+J opens the dock, ⌘⇧M talks, Es
   screen-share picker (macOS asks which window). A red line shows while it is shared; "Прекратить показ" ends
   it. A still frame is sent only when you ask about the window; it is not stored. Reading it needs a
   vision-capable Claude key in Настройки › ИИ — without one the assistant says so instead of guessing.
+
+## Uploading files (what goes where)
+
+| File | Where | What happens |
+|---|---|---|
+| **Factory order file** (one workbook, a sheet per brand, photos, prices, "AA 40, Alina 38" allocations) — e.g. `ORDER__SS27_Alina__Factroy!!!_ (2).xlsx` | Drag onto the Fashion AI bar on any page, or 📎 in the bar / in the dialog | Read in a few seconds (sheets, photos, customers, totals). Into an empty app it creates the season, the orders and the customers (ALINA as owner; «владелица не ALINA» changes that; Cyrillic/Latin spellings of one name become one customer). Saved only after **Подтвердить**. |
+| **A newer version from the factory** (same season) | Same: drag onto the bar | Compared with what is saved: new / changed / cancelled / missing rows, duplicates, rows without a customer. Say «Добавь к существующему, но сначала покажи изменения»; nothing is written before the button. The identical file again is recognised immediately («тот же файл, что уже загружен»). |
+| **Factory PDF** (proforma, invoice) | Drag onto the bar | Article codes are read and matched with the orders. |
+| **Customer reports from another season** (e.g. the SS24 «Отчет_ ALINA SS24 …» files) | Drag onto the bar | Read and shown; the assistant asks before creating that season. This layout is not a factory order: expect total mismatches and unclear rows to review in «Проверка импорта». |
+| Any workbook, to look inside | Drag onto the bar, then «Какие листы в файле?», «Покажи строки 1–40 листа …» | Exact values and formulas, with the row's photos. |
+
+The import review page with every row and photo is `/factory-import/<token>` («Открой проверку импорта»).
+
+## Replies, edits and visuals
+
+- Replies render Markdown (tables, lists, bold). Under each reply: the steps the assistant actually took (from its tool calls), and cards built from those results — figures, deposit bars, rows with photos, files with a strip of the Excel's photos.
+- A change card shows Было / Станет / Разница; the percentage can be changed in the card (− / + / type) and «Пересчитать» sends the same correction as saying «Нет, AA 30%».
+- Answers always appear at the bottom; a message sent while the assistant works waits in line.
+- With a Claude key, navigation, markup changes, corrections, file follow-ups and the deposit table still use the exact rule handlers (≈0.2 s); everything else goes to Claude. If Claude fails, the rules answer and say so.
+- Rows coloured in the factory file keep that colour on the board (name/article cell or a whole coloured row; size-grid shading is ignored).
 
 ## Data checks the assistant can run
 

@@ -240,7 +240,7 @@ BRAND_WORDS = {"диор": "Dior", "круиз": "Cruise", "лоро": "Loro", "
                "брунелло": "Brunello", "кучинелли": "Cucinelli", "мара": "Mara", "сандер": "Sander", "лоэве": "Loewe",
                "лоеве": "Loewe", "барберри": "Burberry", "бёрберри": "Burberry", "алайя": "Alaia", "живанши": "Givenchy",
                "версаче": "Versace", "кензо": "Kenzo", "моклер": "Moncler", "монклер": "Moncler", "эскада": "Escada",
-               "шиапарелли": "Schiaparelli", "ферражамо": "Ferragamo", "феррагамо": "Ferragamo", "тодс": "Tods"}
+               "шиапарелли": "Schiaparelli", "ферражамо": "Ferragamo", "феррагамо": "Ferragamo", "тодс": "Tods", "мейн": "main", "мэйн": "main", "прe": "pre", "бэгс": "BAGS", "бегс": "BAGS"}
 UNITS = {"ноль": 0, "один": 1, "одна": 1, "одну": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6,
          "семь": 7, "восемь": 8, "девять": 9, "десять": 10, "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13,
          "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16, "семнадцать": 17, "восемнадцать": 18,
@@ -381,10 +381,10 @@ def _amount_words(raw: str) -> str:
 
 
 def _percent_words(match: re.Match) -> str:
-    number = match.group(1).replace(",", ".")
-    if "." in number and not number.endswith(".0"):
-        return number.replace(".", ",") + " процента"
-    n = int(float(number))
+    value = Decimal(match.group(1).replace(",", "."))
+    if value != value.to_integral_value():
+        return f"{value.normalize():f}".replace(".", ",") + " процента"
+    n = int(value)
     return f"{n} " + _plural(n, "процент", "процента", "процентов")
 
 
@@ -402,17 +402,26 @@ def to_speech(text: str, codes: list[str] | None = None, limit: int = 320) -> st
     t = re.sub(r"\{[^{}]*\}|\[[^\[\]]*\]\([^)]*\)", " ", t)        # JSON-ish blobs and markdown links
     t = re.sub(r"https?://\S+|(?<![\w])/[a-z][\w/.-]*(?:\?\S*)?", " ", t)
     t = re.sub(r"=[A-Z]+\([^)]*\)|=[A-Z]+\d+[*/+-][A-Z0-9.]+", " ", t)   # spreadsheet formulas
-    t = re.sub(r"[*_#>|•⚠✎→]+", " ", t)
+    # Markdown tables are for the screen: a spoken row of cells is noise.
+    t = "\n".join(l for l in t.splitlines() if l.count("|") < 2 and not re.fullmatch(r"\s*\|?[\s:|-]{3,}\|?\s*", l))
+    t = re.sub(r"\s*→\s*(?=[€+−-]?\s?\d)", ", станет ", t)     # "€ 10 → € 12": a change of amount
+    t = re.sub(r"\s*→\s*", ", ", t)                              # "SS27 → AA": a path
+    t = re.sub(r"\(?(?:ссылка|link)?:?\s*\S+\.(?:xlsx|xlsm|xls|pdf|zip)\)?", " ", t, flags=re.I)   # file names stay on screen
+    t = re.sub(r"\(\s*(?:ссылка|link)?\s*:?\s*\)", " ", t, flags=re.I)
+    t = re.sub(r"^[\s*•-]*[\w ]{1,24}:[\s*]*$", " ", t, flags=re.M)      # a label left with nothing after it ("Excel:", "Подробнее:")
+    t = re.sub(r"[*_#>|•⚠✎]+", " ", t)
     lines = [l.strip(" -:") for l in t.splitlines() if l.strip(" -:")]
     t = ". ".join(lines)
     amount = r"(\d(?:[\d\u00a0\u202f .,]*\d)?)"
     t = re.sub(r"€\s?" + amount, lambda m: _amount_words(m.group(1)), t)
     t = re.sub(r"(?<![\w.,])" + amount + r"\s?(?:€|EUR|евро)", lambda m: _amount_words(m.group(1)), t)
+    # The app writes money as "23 356,35" too (no € sign): two decimals after a comma are always euros and cents.
+    t = re.sub(r"(?<![\d.,])(\d{1,3}(?:[ \u00a0\u202f]\d{3})*,\d{2})(?![\d%])(?:\s?(?:€|EUR|евро))?", lambda m: _amount_words(m.group(1)), t)
     t = re.sub(r"(\d+(?:[.,]\d+)?)\s?%", _percent_words, t)
     for code in sorted(codes or [], key=len, reverse=True):
         if re.fullmatch(r"[A-Z]{2,4}", code):
-            t = re.sub(rf"(?<![A-Za-z]){code}(?![A-Za-z])", spoken_code(code), t)
-    t = re.sub(r"\s+", " ", t).replace(" .", ".").replace("..", ".").strip(" .")
+            t = re.sub(rf"(?<![A-Za-z]){code}(?![A-Za-z])(\d*)", lambda m: spoken_code(code) + (f" {m.group(1)}" if m.group(1) else ""), t)
+    t = re.sub(r"\s+", " ", t).replace(" .", ".").replace(" ,", ",").replace("..", ".").strip(" .")
     if len(t) <= limit:
         return t + "." if t and t[-1] not in ".!?" else t
     sentences = re.split(r"(?<=[.!?])\s+", t)

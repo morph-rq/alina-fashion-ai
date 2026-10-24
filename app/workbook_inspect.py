@@ -197,8 +197,11 @@ def rows(path: Path, sheet: str | None = None, start: int = 1, end: int | None =
             if r["formula"]:
                 cell["f"] = r["formula"]
             grid.setdefault(r["row"], {})[column_letter(r["col"])] = cell
-        photos = {r["row"] for r in con.execute("SELECT row FROM images WHERE sheet = ? AND row BETWEEN ? AND ?", (name, start, end))}
-    out = [{"row": n, "cells": grid.get(n, {}), **({"photo": True} if n in photos else {})} for n in range(start, end + 1) if n in grid or n in photos]
+        photos: dict[int, list[str]] = {}
+        for r in con.execute("SELECT row, part FROM images WHERE sheet = ? AND row BETWEEN ? AND ? ORDER BY row, col", (name, start, end)):
+            photos.setdefault(r["row"], []).append(r["part"])
+    out = [{"row": n, "cells": grid.get(n, {}), **({"photo": True, "photos": photos[n]} if n in photos else {})}
+           for n in range(start, end + 1) if n in grid or n in photos]
     return {"sheet": name, "start": start, "end": end, "sheet_rows": info["rows"], "sheet_columns": column_letter(info["cols"] or 0),
             "rows": out, "next_start": end + 1 if end < (info["rows"] or 0) else None,
             "truncated_to_page": truncated}

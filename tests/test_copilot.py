@@ -8,7 +8,7 @@ from decimal import Decimal as D
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 import factory_fixture
 from test_factory_settlement import db, imported  # noqa: F401
@@ -25,6 +25,8 @@ KNOWN = {"AA", "IDS", "SS", "ALINA"}
 def client(db, tmp_path, monkeypatch):  # noqa: F811
     real = customer_documents.generate
     monkeypatch.setattr(customer_documents, "generate", lambda *a, **k: real(*a, **{**k, "root": tmp_path}))
+    from app import config
+    monkeypatch.setattr(config, "ROOT_DIR", tmp_path)      # previews read the documents the test generated, never real data/
     monkeypatch.setattr(factory_routes, "_known_tokens", lambda _db: KNOWN)
     app.dependency_overrides[get_db] = lambda: (yield db)
     try:
@@ -71,6 +73,16 @@ def test_navigation_and_upload_commands(db, tmp_path):  # noqa: F811
     assert agent.handle(db, "n1aaaaaaaaaaaaaa", "Открой документы").client["navigate"].startswith("/documents")
     change = agent.handle(db, "n1aaaaaaaaaaaaaa", "Измени AA процент на 30")
     assert change.proposal and "AA 30%" in change.proposal["summary"]
+
+
+def test_help_lists_capabilities_and_unknown_text_says_so(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    for asked in ("Что ты умеешь?", "Помощь", "what can ypu do?", "What can you do"):
+        reply = agent.handle(db, "h1aaaaaaaaaaaaaa", asked)
+        assert reply.reply.startswith("Вот что я умею") and reply.speech and not reply.proposal, asked
+    unknown = agent.handle(db, "h1aaaaaaaaaaaaaa", "blah blah random")
+    assert "Не поняла: «blah blah random»" in unknown.reply and "по-русски" in unknown.reply
+    assert "по-русски" not in agent.handle(db, "h1aaaaaaaaaaaaaa", "сделай мне кофе").reply
 
 
 def test_what_is_open_reads_structured_screen(db, tmp_path):  # noqa: F811
@@ -277,3 +289,166 @@ def test_voice_key_terms_respect_the_scribe_limit(db):  # noqa: F811
     db.commit()
     terms = voice.keyterms(db)
     assert all(len(t) <= 20 for t in terms) and {"Brunello", "Cucinelli", "women"} <= set(terms)
+
+
+# --- Voice audit regressions (2026-10-24) ------------------------------------------------------
+
+class _Down:
+    def complete(self, *a, **k):
+        raise ValueError("ИИ сейчас занят или недоступен (HTTP 529).")
+
+
+class _Scripted:
+    """A fake model that calls the given tools once, then answers."""
+    def __init__(self, uses, text="Готово."):
+        self.uses, self.text, self.n = uses, text, 0
+
+    def complete(self, system, messages, tools):
+        self.n += 1
+        if self.n == 1:
+            return {"content": [{"type": "tool_use", "id": f"t{i}", "name": n, "input": p} for i, (n, p) in enumerate(self.uses)]}
+        return {"content": [{"type": "text", "text": self.text}]}
+
+
+def test_model_failure_falls_back_to_rules_instead_of_an_error(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    turn = agent.handle(db, "v1aaaaaaaaaaaaaa", "Сколько мы должны фабрике?", {"season": "SS27"}, client=_Down())
+    assert turn.reply.startswith("⚠ ИИ сейчас занят") and "Фабрике всего" in turn.reply
+
+
+def test_fast_path_answers_navigation_and_pronoun_markup_without_the_model(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    never = _Down()
+    nav = agent.handle(db, "v2aaaaaaaaaaaaaa", "Открой Dior cruise и покажи все заказы IDS", {}, client=never, channel="voice")
+    assert nav.client["navigate"].endswith("customer=IDS") and nav.speech.startswith("Открываю Dior cruise, IDS: ")
+    screen = {"season": "SS27", "brand": "Dior cruise", "customer": "AA"}
+    recalc = agent.handle(db, "v2bbbbbbbbbbbbbb", "Поставь IDS 35% и пересчитай предоплату.", screen, client=never, channel="voice")
+    assert recalc.proposal and "IDS 35%" in recalc.proposal["summary"]      # "предоплату" is not a payment
+    first = agent.handle(db, "v2aaaaaaaaaaaaaa", "Поставь ей 30%", screen, client=never, channel="voice")
+    assert first.proposal and first.proposal["editable"] == [{"customer": "AA", "markup": "30", "scope": "Dior cruise"}]
+    assert "было" in first.speech and "Сохранить?" in first.speech
+    revised = agent.handle(db, "v2aaaaaaaaaaaaaa", "Нет, лучше 35", screen | {"proposal": {"id": first.proposal["id"], "version": 1}},
+                           client=never, channel="voice")
+    assert revised.proposal and "AA 35%" in revised.proposal["summary"]
+    assert db.get(AgentProposal, db.scalar(select(AgentProposal.id).where(AgentProposal.public_id == first.proposal["id"]))).status == "cancelled"
+
+
+def test_change_that_alters_nothing_is_not_a_proposal(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    screen = {"season": "SS27", "brand": "Dior cruise"}
+    agent.commit_proposal(db, agent.handle(db, "v3aaaaaaaaaaaaaa", "IDS 30%", screen).proposal["id"])
+    again = agent.handle(db, "v3aaaaaaaaaaaaaa", "IDS 30%", screen)
+    assert again.proposal is None and "уже 30%" in again.reply and "менять нечего" in again.reply
+
+
+def test_model_turn_gets_panels_and_steps_from_real_tool_results(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    model = _Scripted([("get_customer_allocations", {"customer": "IDS", "season": "SS27"}),
+                       ("calculate_factory_settlement", {"season": "SS27"})], "IDS должна **внести** предоплату.")
+    turn = agent.handle(db, "v4aaaaaaaaaaaaaa", "Сколько должна IDS по всем брендам?", {"season": "SS27"}, client=model)
+    labels = [f["label"] for f in turn.panel["figures"]]
+    assert labels[0] == "Заказ IDS" and "Осталось внести" in labels and turn.panel["selection"]["rows"]
+    assert turn.panel["table"]["rows"]                      # the season table from the settlement call
+    steps = agent.describe_steps(turn.tool_calls)
+    assert [s["label"] for s in steps] == ["Прочитала позиции клиента", "Посчитала предоплаты и долги"] and all(s["ok"] for s in steps)
+
+
+def test_spoken_text_skips_tables_files_and_reads_money_and_codes():
+    from app.voice import to_speech
+    spoken = to_speech("Готово: заказ **23 356,35** €, наценка 35.00%.\n\n| Бренд | Сумма |\n|---|---|\n| Dior | 2 025,00 |\n"
+                       "- **PDF:** SS27_IDS_v1.pdf (ссылка: /documents/9/download)\nОхват: SS27 → IDS. Заказ IDS: € 10,00 → € 12,50",
+                       ["IDS", "SS"])
+    assert "|" not in spoken and ".pdf" not in spoken and "ссылка" not in spoken
+    assert "23 356 евро 35 центов" in spoken and "35 процентов" in spoken and "эс-эс 27, ай-ди-эс" in spoken
+    assert "10 евро, станет 12 евро 50 центов" in spoken
+
+
+def test_stop_not_this_customer_moves_the_pending_change(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    screen = {"season": "SS27", "brand": "Dior cruise"}
+    first = agent.handle(db, "v5aaaaaaaaaaaaaa", "Поставь IDS 35%", screen, channel="voice")
+    moved = agent.handle(db, "v5aaaaaaaaaaaaaa", "Стоп, не IDS, а AA", screen | {"proposal": {"id": first.proposal["id"], "version": 1}}, channel="voice")
+    assert moved.proposal and "AA 35%" in moved.proposal["summary"] and "IDS" not in moved.proposal["summary"]
+    assert moved.reply.startswith("Поняла: не IDS, а AA") and "Сохранить?" in moved.speech
+    statuses = {p.public_id: p.status for p in db.scalars(select(AgentProposal))}
+    assert statuses[first.proposal["id"]] == "cancelled" and statuses[moved.proposal["id"]] == "pending"
+    assert db.scalar(select(func.count()).select_from(AgentProposal).where(AgentProposal.status == "committed")) == 0
+
+
+def test_excel_photos_are_listed_and_workbook_rows_carry_their_photos(client, db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    made = agent.handle(db, "v6aaaaaaaaaaaaaa", "Сделай Excel и PDF для IDS", {"season": "SS27"})
+    xlsx = next(d for d in made.panel["documents"] if d["format"] == "xlsx")
+    listed = client.get(f"/documents/{xlsx['id']}/images").json()
+    assert listed["total"] >= 1 and client.get(listed["images"][0]["url"]).headers["content-type"].startswith("image/")
+    batch = db.scalar(select(ImportBatch))
+    path = wi.resolve(db, f"batch:{batch.id}")[0]
+    sheet = next(s for s in wi.outline(path)["sheets"] if s["photos"])
+    page = wi.rows(path, sheet["name"], 1, 60)
+    with_photo = [r for r in page["rows"] if r.get("photos")]
+    assert with_photo and all(p.startswith("xl/media/") for r in with_photo for p in r["photos"])
+    image = client.get("/api/inspect/image", params={"source": f"batch:{batch.id}", "part": with_photo[0]["photos"][0]})
+    assert image.status_code == 200 and image.headers["content-type"].startswith("image/")
+    assert client.get("/api/inspect/image", params={"source": f"batch:{batch.id}", "part": "../secret"}).status_code == 404
+
+
+def test_first_file_into_an_empty_app_creates_season_customers_and_owner(db, tmp_path, monkeypatch):  # noqa: F811
+    import json as _json
+    from app import copilot
+    from app.models import AgentMessage, Customer, CustomerAlias, Season
+    for model in (CustomerPricingRule, CustomerAlias, Customer):          # an empty app: no customers, no season
+        for row in db.scalars(select(model)):
+            db.delete(row)
+    db.commit()
+    assert not db.scalars(select(Season)).first()
+    path = factory_fixture.build(tmp_path / "Dior cruise SS27.xlsx")
+    analysis = analyze_workbook(path, "Dior cruise SS27.xlsx")
+    monkeypatch.setattr(copilot, "load_analysis", lambda t: analysis)
+    monkeypatch.setattr(copilot, "import_status", lambda t: {"state": "ready"})
+    db.add(AgentMessage(conversation="f1aaaaaaaaaaaaaa", role="assistant", text="файл",       # as after the file was dropped
+                        data_json=_json.dumps({"context": {"attachment": {"token": "a" * 24, "kind": "xlsx", "season": "SS27"}}})))
+    db.commit()
+    turn = agent.handle(db, "f1aaaaaaaaaaaaaa", "Создай новый сезон и добавь")
+    assert turn.proposal and turn.proposal["kind"] == "import", turn.reply
+    text = "\n".join(turn.proposal["will_do"])
+    assert "Новые клиенты будут созданы" in text and "ALINA — это вы (владелица)" in text
+    assert turn.question is None                       # nothing left to answer before the button
+
+
+def test_cyrillic_and_latin_spellings_of_one_customer_are_twins():
+    assert revision.spelling_twins(["NATALYA", "НАТАЛЬЯ", "СП", "AA"]) == {"НАТАЛЬЯ": "NATALYA"}
+
+
+def test_markup_for_a_customer_without_items_there_says_so_instead_of_already_set(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    out = agent.run_tool(db, "propose_changes", {"summary": "x", "actions": [{"action": "set_customer_markup",
+                         "params": {"customer": "IDS", "season": "SS27", "brand": "Нет такого"}}]}, agent._Pending())
+    assert "error" in out or out.get("no_items") is not None
+    from app.models import Brand, Order, Season
+    season = db.scalar(select(Season))
+    empty_brand = Brand(name="Empty brand"); db.add(empty_brand); db.flush()
+    db.add(Order(season_id=season.id, brand_id=empty_brand.id)); db.commit()
+    turn = agent.handle(db, "v7aaaaaaaaaaaaaa", "IDS 35%", {"season": "SS27", "brand": "Empty brand"})
+    assert turn.proposal is None and "У IDS нет позиций в этом заказе" in turn.reply and "Dior cruise" in turn.reply
+    assert "уже" not in turn.reply
+
+
+def test_the_same_file_again_is_recognised_before_any_comparison(client, db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    batch = db.scalar(select(ImportBatch))
+    from app import copilot
+    analysis = analyze_workbook(factory_fixture.build(tmp_path / "again.xlsx"), "again.xlsx")
+    analysis.sha256 = batch.sha256
+    copilot_load, copilot_status = copilot.load_analysis, copilot.import_status
+    copilot.load_analysis, copilot.import_status = (lambda t: analysis), (lambda t: {"state": "ready", "filename": "again.xlsx"})
+    try:
+        out = copilot.attachment_turn(db, "s1aaaaaaaaaaaaaa", "b" * 24)
+    finally:
+        copilot.load_analysis, copilot.import_status = copilot_load, copilot_status
+    assert "тот же файл, что уже загружен" in out["reply"] and out["context"]["attachment"]["already"]
+
+
+def test_all_orders_of_a_customer_ignores_the_brand_on_screen(db, tmp_path):  # noqa: F811
+    imported(db, tmp_path)
+    turn = agent.handle(db, "v8aaaaaaaaaaaaaa", "Покажи все заказы AA", {"season": "SS27", "brand": "Нет такого бренда", "path": "/board"})
+    assert "brand=" not in turn.client["navigate"] and turn.panel["selection"]["rows"]

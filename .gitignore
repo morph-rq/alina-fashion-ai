@@ -24,3 +24,6 @@ phone-preview/
 .idea/
 .vscode/
 .DS_Store
+
+# Local env copies hold real keys.
+.env.local*

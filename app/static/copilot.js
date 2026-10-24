@@ -40,7 +40,14 @@
     bar.dataset.state = state; statusText.textContent = STATES[state] || '';
     stopBtn.hidden = !['listening', 'connecting', 'thinking', 'working', 'speaking', 'reading'].includes(state) && !handsFree.checked;
   }
-  const say = (message, tone = '') => { note.hidden = !message; note.textContent = message || ''; note.dataset.tone = tone; };
+  let noteTimer = null;
+  const say = (message, tone = '') => {
+    note.hidden = !message; note.textContent = message || ''; note.dataset.tone = tone;
+    clearTimeout(noteTimer); if (message) noteTimer = setTimeout(() => { note.hidden = true; }, tone ? 12000 : 6000);
+    if (message && (tone === 'danger' || tone === 'warn')) {      // problems also go into the dialog, where the answers are
+      openDock(); bubble(`copilot-sys tone-${tone}`, `<span aria-hidden="true">${tone === 'danger' ? '⚠' : 'ℹ'}</span> ${esc(message)}`);
+    }
+  };
 
   /* ---------- What the assistant sees: structured page state ---------- */
   function boardPick() {
@@ -101,22 +108,72 @@
   else if (local.get('copilot-open', false) && !narrow()) openDock();
 
   /* ---------- Messages ---------- */
-  const bubble = (cls, html) => { const div = document.createElement('div'); div.className = cls; div.innerHTML = html; list.appendChild(div); div.scrollIntoView({ block: 'end', behavior: 'smooth' }); return div; };
+  const bubble = (cls, html) => { const div = document.createElement('div'); div.className = cls; div.innerHTML = html; list.appendChild(div); reveal(div); return div; };
+  /* Scrolls the conversation only (never the page under it). A long answer is shown from its first line. */
+  function reveal(el) {
+    requestAnimationFrame(() => {
+      const top = list.scrollTop + el.getBoundingClientRect().top - list.getBoundingClientRect().top - 8;
+      const target = el.offsetHeight > list.clientHeight * 0.8 ? top : list.scrollHeight;
+      list.scrollTo({ top: target, behavior: 'smooth' });
+    });
+  }
   const textHtml = (t) => esc(t).replace(/\n/g, '<br>');
+  /* Assistant replies are Markdown (bold, lists, tables, headings). Escaped first, so nothing in a reply can inject HTML. */
+  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*?)\*(?!\*)/g, '$1<em>$2</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>').replace(/(€\s?[\d\u00a0\u202f ]+[.,]?\d*|[\d\u00a0\u202f ]+,\d{2}\s?€)/g, '<span class="fx-money">$1</span>');
+  function md(text) {
+    const lines = String(text ?? '').replace(/\r/g, '').split('\n'); const out = []; let i = 0;
+    const cells = (l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+    while (i < lines.length) {
+      const l = lines[i];
+      if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1])) {
+        const head = cells(l); i += 2; const rows = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(cells(lines[i])); i += 1; }
+        const num = head.map((_, c) => rows.length && rows.every((r) => /^[-+€\d\s\u00a0\u202f.,%]*$/.test(r[c] || '')));
+        out.push(`<div class="fx-table-wrap"><table class="table compact md-table"><thead><tr>${head.map((h, c) => `<th${num[c] ? ' class="num"' : ''}>${inline(h)}</th>`).join('')}</tr></thead><tbody>${
+          rows.map((r) => `<tr>${head.map((_, c) => `<td${num[c] ? ' class="num"' : ''}>${inline(r[c] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+        continue;
+      }
+      if (/^\s*([-*•]|\d+[.)])\s+/.test(l)) {
+        const ordered = /^\s*\d/.test(l); const items = [];
+        while (i < lines.length && /^\s*([-*•]|\d+[.)])\s+/.test(lines[i])) {
+          const depth = lines[i].match(/^\s*/)[0].length >= 2;
+          items.push(`<li${depth ? ' class="sub"' : ''}>${inline(lines[i].replace(/^\s*([-*•]|\d+[.)])\s+/, ''))}</li>`); i += 1;
+        }
+        out.push(`<${ordered ? 'ol' : 'ul'} class="md-list">${items.join('')}</${ordered ? 'ol' : 'ul'}>`); continue;
+      }
+      const h = l.match(/^\s*#{1,4}\s+(.*)$/);
+      if (h) { out.push(`<h4 class="md-h">${inline(h[1])}</h4>`); i += 1; continue; }
+      if (!l.trim()) { i += 1; continue; }
+      const para = [];
+      while (i < lines.length && lines[i].trim() && !/^\s*(\||[-*•]\s|\d+[.)]\s|#)/.test(lines[i])) { para.push(inline(lines[i])); i += 1; }
+      if (para.length) out.push(`<p>${para.join('<br>')}</p>`); else { out.push(`<p>${inline(l)}</p>`); i += 1; }
+    }
+    return out.join('');
+  }
+  function stepsHtml(steps) {
+    if (!steps?.length) return '';
+    return `<ol class="fx-steps" aria-label="Что сделал ассистент">${steps.map((st) => `<li class="${st.ok ? 'ok' : 'err'}"><span>${esc(st.label)}</span>${
+      st.detail ? `<small>${esc(st.detail)}</small>` : ''}${st.error ? `<small class="tone-danger">${esc(st.error)}</small>` : ''}</li>`).join('')}</ol>`;
+  }
+  const replyHtml = (text, steps) => `<div class="md">${md(text)}</div>${stepsHtml(steps)}`;
   function diffTable(diff) {
     if (!diff || !diff.length) return '';
-    return `<table class="table fx-diff"><thead><tr><th></th><th class="num">Было</th><th class="num">Станет</th></tr></thead><tbody>${
-      diff.map((r) => `<tr><td>${esc(r.label)}</td><td class="num">${eur(r.before)}</td><td class="num"><strong>${eur(r.after)}</strong></td></tr>`).join('')}</tbody></table>`;
+    return `<table class="table fx-diff"><thead><tr><th></th><th class="num">Было</th><th class="num">Станет</th><th class="num">Разница</th></tr></thead><tbody>${
+      diff.map((r) => { const d = Number(r.after) - Number(r.before); return `<tr><td>${esc(r.label)}</td><td class="num muted">${eur(r.before)}</td><td class="num"><strong>${eur(r.after)}</strong></td><td class="num ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '+' : d < 0 ? '−' : ''}${eur(Math.abs(d)).replace('€ ', '€')}</td></tr>`; }).join('')}</tbody></table>`;
   }
   function proposalCard(p) {
     const existing = $(`[data-proposal="${CSS.escape(p.id)}"]`, list);
     const docs = (p.result?.documents || []).map((d) => `<a href="${esc(d.url)}" download>${esc(String(d.format).toUpperCase())} ${esc(d.customer || '')} v${esc(d.version)}</a>`).join(' ');
     const say_ = p.button_only ? '<span class="muted fx-say">только кнопкой</span>' : '<span class="muted fx-say">или скажите «Да, сохрани»</span>';
-    const html = `<strong>${esc(p.summary)}</strong><ul>${(p.will_do || []).map((l) => `<li>${esc(l)}</li>`).join('')}${(p.documents || []).map((d) => `<li>Excel + PDF для ${esc(d.customer)} (${esc(d.season)})</li>`).join('')}</ul>${diffTable(p.diff)}`
+    const edit = p.status === 'pending' && p.editable?.length ? `<div class="fx-edit" aria-label="Изменить процент">${p.editable.map((e) => `<label><b>${esc(e.customer)}</b>${e.scope ? ` <small>${esc(e.scope)}</small>` : ''}
+      <span class="fx-pct"><button type="button" data-step="-5" aria-label="Меньше">−</button><input type="number" min="0" max="300" step="0.5" value="${esc(Number(e.markup))}" data-edit-customer="${esc(e.customer)}" data-was="${esc(Number(e.markup))}"><i>%</i><button type="button" data-step="5" aria-label="Больше">+</button></span></label>`).join('')}
+      <button type="button" class="btn sm" data-recalc hidden>Пересчитать</button></div>` : '';
+    const html = `<span class="fx-kind">${p.kind === 'import' ? 'Импорт файла' : 'Изменение'} · <i data-state>${p.status === 'pending' ? 'ждёт подтверждения' : p.status === 'committed' ? 'сохранено' : 'отменено'}</i></span><strong>${esc(p.summary)}</strong>${edit}<ul>${(p.will_do || []).map((l) => `<li>${esc(l)}</li>`).join('')}${(p.documents || []).map((d) => `<li>Excel + PDF для ${esc(d.customer)} (${esc(d.season)})</li>`).join('')}</ul>${diffTable(p.diff)}`
       + (p.status === 'pending' ? `<div class="btn-row"><button class="btn primary sm" data-commit>Подтвердить</button><button class="btn quiet sm" data-cancel>Отмена</button>${say_}</div>`
         : p.status === 'committed' ? `<p class="tone-ok">Сохранено. ${docs}</p>` : '<p class="muted">Отменено — ничего не изменено.</p>');
     if (p.status === 'pending') {
-      $$('.fx-proposal[data-status="pending"]', list).forEach((old) => { if (old.dataset.proposal !== p.id) { old.dataset.status = 'cancelled'; const row = $('.btn-row', old); if (row) row.outerHTML = '<p class="muted">Заменено новым предложением.</p>'; } });
+      $$('.fx-proposal[data-status="pending"]', list).forEach((old) => { if (old.dataset.proposal !== p.id) { old.dataset.status = 'cancelled'; $('.fx-edit', old)?.remove(); const l = $('[data-state]', old); if (l) l.textContent = 'заменено'; const row = $('.btn-row', old); if (row) row.outerHTML = '<p class="muted">Заменено новым предложением.</p>'; } });
     }
     const card = existing || bubble('fx-proposal', '');
     card.innerHTML = html; card.dataset.proposal = p.id; card.dataset.version = p.version || 1; card.dataset.status = p.status;
@@ -128,7 +185,7 @@
   }
   function renderMessage(m) {
     if (m.role === 'user') bubble('user-bubble', textHtml(m.text) + (m.raw && m.raw !== m.text ? `<small class="fx-raw">Распознано: «${esc(m.raw)}»</small>` : ''));
-    else { bubble('assistant-bubble', textHtml(m.text)); if (m.proposal) proposalCard(m.proposal); }
+    else { bubble('assistant-bubble is-md', replyHtml(m.text, m.steps)); if (m.proposal) proposalCard(m.proposal); if (m.panel) renderPanel(m.panel); }
   }
   async function loadConversation() {
     loaded = true;
@@ -140,17 +197,24 @@
     (r.messages || []).forEach(renderMessage);
     const lastQ = [...(r.messages || [])].reverse().find((m) => m.role === 'assistant');
     if (lastQ?.question) question(lastQ.question);
-    if (r.panel) renderPanel(r.panel);
     chips();
   }
 
   list.addEventListener('click', async (e) => {
     if (e.target.matches('[data-option]')) { send(e.target.textContent); return; }
     if (e.target.matches('[data-ask]')) { send(e.target.dataset.ask); return; }
+    if (e.target.matches('[data-retry]')) { e.target.closest('.btn-row').remove(); send(e.target.dataset.retry); return; }
     const pager = e.target.closest('[data-inspect-next]');
     if (pager) { send(pager.dataset.inspectNext); return; }
     const card = e.target.closest('[data-proposal]');
     if (!card) return;
+    const stepBtn = e.target.closest('[data-step]');
+    if (stepBtn) { const inp = $('input', stepBtn.parentElement); inp.value = Math.max(0, Number(inp.value) + Number(stepBtn.dataset.step)); inp.dispatchEvent(new Event('input', { bubbles: true })); return; }
+    if (e.target.matches('[data-recalc]')) {
+      const changed = $$('[data-edit-customer]', card).filter((i) => Number(i.value) !== Number(i.dataset.was));
+      for (const i of changed) await send(`Нет, ${i.dataset.editCustomer} ${String(i.value).replace('.', ',')}%`, { note: 'Изменено в карточке: ' });
+      return;
+    }
     if (e.target.matches('[data-commit]')) {
       e.target.disabled = true; e.target.textContent = 'Сохраняю…'; setState('working');
       const r = await post(`/api/agent/proposals/${card.dataset.proposal}/commit`, {});
@@ -161,10 +225,18 @@
         : r.data.ok ? `<p class="tone-ok">Сохранено. ${(r.data.messages || []).map(esc).join(' ')} ${(r.data.documents || []).map((d) => `<a href="${esc(d.url)}" download>${esc(String(d.format).toUpperCase())} ${esc(d.customer || '')} v${esc(d.version)}</a>`).join(' ')}</p>`
           : `<p class="tone-danger">${esc(r.data.error)}</p>`;
       if (r.data.ok && r.data.documents?.length) renderPanel({ documents: r.data.documents.map((d) => ({ ...d, kind: 'customer' })), bundle: r.data.documents.length > 1 ? `/documents/bundle?ids=${r.data.documents.map((d) => d.id).join(',')}` : null });
+      const label = $('[data-state]', card); if (label) label.textContent = r.data.ok && !stale ? 'сохранено' : 'не сохранено';
+      $('.fx-edit', card)?.remove();
       if (r.data.ok) afterCommit(r.data);
     }
-    if (e.target.matches('[data-cancel]')) { await post(`/api/agent/proposals/${card.dataset.proposal}/cancel`, {}); card.dataset.status = 'cancelled'; $('.btn-row', card).outerHTML = '<p class="muted">Отменено — ничего не изменено.</p>'; }
+    if (e.target.matches('[data-cancel]')) { await post(`/api/agent/proposals/${card.dataset.proposal}/cancel`, {}); card.dataset.status = 'cancelled'; $('.btn-row', card).outerHTML = '<p class="muted">Отменено — ничего не изменено.</p>'; $('.fx-edit', card)?.remove(); const l = $('[data-state]', card); if (l) l.textContent = 'отменено'; }
   });
+  list.addEventListener('input', (e) => {
+    if (!e.target.matches('[data-edit-customer]')) return;
+    const card = e.target.closest('[data-proposal]');
+    $('[data-recalc]', card).hidden = !$$('[data-edit-customer]', card).some((i) => Number(i.value) !== Number(i.dataset.was));
+  });
+  list.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-edit-customer]')) { e.preventDefault(); $('[data-recalc]', e.target.closest('[data-proposal]'))?.click(); } });
   function afterCommit(data) {
     if (data.follow_up) { session.set('copilot-follow-up', { text: data.follow_up, at: Date.now() }); }
     if (data.navigate && !slot) { location.href = data.navigate; return; }
@@ -173,42 +245,70 @@
   }
 
   /* ---------- Sending ---------- */
-  async function send(message, { channel = 'text', raw = null, note: prefix = '' } = {}) {
+  /* One request at a time: a message sent while the assistant is working waits in line and is answered in order. */
+  const queue = [];
+  async function send(message, options = {}) {
     message = (message || '').trim();
-    if (!message || busy) return;
+    if (!message) return;
+    if (busy) {
+      openDock();
+      const waiting = bubble('user-bubble is-queued', `${textHtml(message)}<small class="muted">В очереди — отвечу после текущего</small>`);
+      await new Promise((resolve) => queue.push({ resolve, waiting }));
+    }
+    try { await sendNow(message, options); } finally { const next = queue.shift(); if (next) next.resolve(); }
+  }
+  async function sendNow(message, { channel = 'text', raw = null, note: prefix = '', waiting = null } = {}) {
     busy = true; openDock(); hideSuggest();
     voice.stopSpeaking();
-    bubble('user-bubble', (prefix ? `<small class="muted">${esc(prefix)}</small>` : '') + textHtml(message) + (raw && raw !== message ? `<small class="fx-raw">Распознано: «${esc(raw)}»</small>` : ''));
-    const wait = bubble('assistant-bubble is-thinking', '<span class="dots"><i></i><i></i><i></i></span>');
+    $$('.user-bubble.is-queued', list).filter((b) => b.textContent.startsWith(message)).slice(0, 1).forEach((b) => b.remove());
+    const asked = bubble('user-bubble', (prefix ? `<small class="muted">${esc(prefix)}</small>` : '') + textHtml(message) + (raw && raw !== message ? `<small class="fx-raw">Распознано: «${esc(raw)}»</small>` : ''));
+    const wait = bubble('assistant-bubble is-thinking', '<span class="dots"><i></i><i></i><i></i></span><small class="muted" data-elapsed></small>');
+    const started = Date.now();
+    const ticker = setInterval(() => { const sec = Math.round((Date.now() - started) / 1000); const el = $('[data-elapsed]', wait); if (el && sec >= 2) el.textContent = ` Думаю… ${sec} с`; }, 1000);
     setState('thinking');
     const s = screen();
     const aboutWindow = /посмотри на (это|этот|мой|окно)|в этом окне|это окно|который я открыла|на mac|на маке|что здесь написано/i.test(message);
-    if (aboutWindow && share.stream) { busy = false; wait.remove(); setState('idle'); share.ask(message); return; }
+    if (aboutWindow && share.stream) { clearInterval(ticker); busy = false; wait.remove(); setState('idle'); share.ask(message); return; }
     if (aboutWindow && !/fashion|заказ|страниц/i.test(message)) {
-      busy = false; setState('idle');
+      clearInterval(ticker); busy = false; setState('idle');
       wait.className = 'assistant-bubble';
       wait.innerHTML = 'Другие окна Mac я не вижу, пока вы сами их не покажете: ⚙ в этом диалоге → «Показать окно Mac ассистенту…» (macOS спросит, какое окно). Всё, что открыто в Fashion, я вижу и так. Файл Excel или PDF можно просто перетащить сюда.';
       return;
     }
     let r;
     abort = new AbortController();
+    // A spoken request that takes a moment (the AI model, a document) gets a short "working on it" — never silence.
+    const filler = (channel === 'voice' || handsFree.checked) && speakToggle.checked && voiceConfig.configured
+      ? setTimeout(() => { if (busy) voice.speak(/excel|pdf|эксел|пдф|документ|файл/i.test(message) ? 'Сейчас сделаю файлы.' : 'Секунду, проверяю.'); }, 1500) : null;
     try {
       const key = s._key; delete s._key;
       const resp = await fetch('/api/agent/message', { method: 'POST', signal: abort.signal, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ conversation, text: message, raw, channel, screen: s }) });
-      r = { data: await resp.json().catch(() => ({ reply: 'Ошибка ответа.' })) };
+      r = { data: await resp.json().catch(() => ({ reply: `Приложение ответило ошибкой (${resp.status}). Ничего не изменено.`, error: true })) };
       local.set('copilot-last-screen', key);
     } catch (err) {
-      r = { data: { reply: err.name === 'AbortError' ? 'Остановлено.' : 'Нет связи с приложением. Проверьте, что оно запущено.' } };
+      r = { data: { reply: err.name === 'AbortError' ? 'Остановлено.' : 'Нет связи с приложением. Проверьте, что оно запущено.' }, failed: err.name !== 'AbortError' };
     }
+    clearTimeout(filler); clearInterval(ticker);
     abort = null; busy = false; setState('idle');
-    wait.className = 'assistant-bubble'; wait.innerHTML = textHtml(r.data.reply || r.data.detail || 'Ошибка');
+    // The answer always goes at the bottom: if anything was added after the placeholder, move it down and say what it answers.
+    if (wait.nextElementSibling) {
+      list.appendChild(wait);
+      if (asked.nextElementSibling !== wait) wait.dataset.answers = message.slice(0, 60);
+    }
+    wait.className = `assistant-bubble is-md${r.data.error ? ' is-error' : ''}`; wait.innerHTML = (wait.dataset.answers ? `<small class="muted fx-answers">↳ на «${esc(wait.dataset.answers)}»</small>` : '') + replyHtml(r.data.reply || r.data.detail || 'Ошибка', r.data.steps)
+      + (r.data.error || r.failed ? `<div class="btn-row"><button type="button" class="btn sm" data-retry="${esc(message)}">Повторить</button></div>` : '');
+    reveal(wait);
     question(r.data.question);
     if (r.data.proposal) proposalCard(r.data.proposal);
     if (r.data.panel) renderPanel(r.data.panel);
     if (dock.hidden || narrow()) { const b = $('.copilot-badge', expand); b.hidden = false; b.textContent = '1'; }
     const spoken = (channel === 'voice' || handsFree.checked) && speakToggle.checked && r.data.speech ? voice.speak(r.data.speech) : null;
     const client = r.data.client || {};
+    // Saved by voice or text ("Да, сохрани"): the page under the dialog shows the new figures, as after the button.
+    if (r.data.proposal?.status === 'committed' && !client.navigate && !client.follow_up && !slot) {
+      (async () => { if (spoken) { await spoken; await voice.untilQuiet(15000); } location.reload(); })();
+    }
     if (client.open_upload) fileInput.click();
     if (client.follow_up) send(client.follow_up, { note: 'Продолжаю: ' });
     chips();
@@ -223,6 +323,13 @@
     session.set('copilot-nav', { at: Date.now() });
     location.href = url;          // the dock re-opens on the next page with the same conversation
   }
+  const dockForm = $('#copilot-dock-form'); const dockInput = $('#copilot-dock-input');
+  const grow = () => { dockInput.style.height = 'auto'; dockInput.style.height = `${Math.min(dockInput.scrollHeight, 160)}px`; };
+  dockInput.addEventListener('input', grow);
+  dockInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); dockForm.requestSubmit(); } });
+  dockForm.addEventListener('submit', (e) => { e.preventDefault(); const m = dockInput.value; if (!m.trim()) return; dockInput.value = ''; grow(); send(m); dockInput.focus(); });
+  $('[data-dock-attach]', dock).addEventListener('click', () => fileInput.click());
+  $('[data-dock-mic]', dock).addEventListener('click', () => { if (voice.active) voice.release(); else voice.start(handsFree.checked ? 'handsfree' : 'push'); });
   form.addEventListener('submit', (e) => { e.preventDefault(); const raw = input.dataset.raw || null; const message = input.value; input.value = ''; delete input.dataset.raw; send(message, { channel: raw ? 'voice' : 'text', raw }); });
   stopBtn.addEventListener('click', stopAll);
   function stopAll() { handsFree.checked = false; voice.stopSpeaking(); voice.close(); abort?.abort(); setState('idle'); say(''); }
@@ -295,10 +402,10 @@
     if (p.table) {
       const t = p.table; const numeric = new Set(t.numeric || []);
       parts.push(`<section class="fx-side-block"><h3>${esc(t.title)}</h3><div class="fx-table-wrap${t.grid ? ' is-grid' : ''}"><table class="table compact"><thead><tr>${t.columns.map((c, i) => `<th${numeric.has(i) ? ' class="num"' : ''}>${esc(c)}</th>`).join('')}</tr></thead><tbody>${
-        t.rows.map((row) => `<tr>${row.map((v, i) => `<td${numeric.has(i) ? ' class="num"' : ''}>${esc(v)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${t.columns.length}" class="muted">Пусто</td></tr>`}</tbody></table></div></section>`);
+        t.rows.map((row, r) => `<tr>${row.map((v, i) => `<td${numeric.has(i) ? ' class="num"' : ''}>${esc(v)}${i === 0 && t.images?.[r] ? `<span class="fx-cell-photos">${t.images[r].map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Фото из строки" loading="lazy"></a>`).join('')}</span>` : ''}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${t.columns.length}" class="muted">Пусто</td></tr>`}</tbody></table></div></section>`);
     }
     if (p.documents?.length) {
-      parts.push(`<section class="fx-side-block"><h3>Файлы</h3><ul class="fx-files">${p.documents.map((d) => `<li><a class="btn sm" href="${esc(d.url)}" download>${esc(String(d.format).toUpperCase())}</a> <span>${esc(d.kind === 'internal' ? 'Внутренний отчёт' : d.kind === 'original' ? 'Оригинал с ценами' : d.customer)}${d.version ? ` · v${esc(d.version)}` : ''}</span>${d.format === 'pdf' ? ` <a class="muted" href="${esc(d.url.replace('/download', '/view'))}" target="_blank" rel="noopener">просмотр</a>` : ` <a class="muted" href="${esc(d.url.replace('/download', '/view'))}" target="_blank" rel="noopener">просмотр</a>`}</li>`).join('')}</ul>${p.bundle ? `<a class="btn sm primary" href="${esc(p.bundle)}" download>Скачать всё (ZIP)</a>` : ''}<p class="muted">Предпросмотр — клиентам ничего не отправлено. Все версии — в <a href="/documents">Документах</a>.</p></section>`);
+      parts.push(`<section class="fx-side-block"><h3>Файлы</h3><ul class="fx-files">${p.documents.map((d) => `<li><a class="btn sm" href="${esc(d.url)}" download>${esc(String(d.format).toUpperCase())}</a> <span>${esc(d.kind === 'internal' ? 'Внутренний отчёт' : d.kind === 'original' ? 'Оригинал с ценами' : d.customer)}${d.version ? ` · v${esc(d.version)}` : ''}</span>${d.format === 'pdf' ? ` <a class="muted" href="${esc(d.url.replace('/download', '/view'))}" target="_blank" rel="noopener">просмотр</a>` : ` <a class="muted" href="${esc(d.url.replace('/download', '/view'))}" target="_blank" rel="noopener">просмотр</a>`}</li>`).join('')}</ul>${p.bundle ? `<a class="btn sm primary" href="${esc(p.bundle)}" download>Скачать всё (ZIP)</a>` : ''}${p.documents.filter((d) => /^xlsx?$/i.test(d.format) && d.id).map((d) => `<div class="fx-thumbs" data-thumbs="/documents/${esc(d.id)}/images" data-view="${esc(d.url.replace('/download', '/view'))}"><span class="muted">Загружаю фото из Excel…</span></div>`).join('')}<p class="muted">Предпросмотр — клиентам ничего не отправлено. Все версии — в <a href="/documents">Документах</a>.</p></section>`);
     }
     if (p.item) {
       parts.push(`<section class="fx-side-block"><h3>Позиция</h3>${media(p.item.image) ? `<img class="fx-item-photo" src="${esc(media(p.item.image))}" alt="">` : ''}<ul class="plain-list">${p.item.facts.map((f) => `<li>${esc(f)}</li>`).join('')}</ul></section>`);
@@ -321,6 +428,12 @@
     }
     if (!parts.length) return;
     const box = bubble('copilot-result', parts.join(''));
+    $$('[data-thumbs]', box).forEach(async (strip) => {
+      const r = await fetch(strip.dataset.thumbs).then((x) => x.json()).catch(() => ({ images: [] }));
+      strip.innerHTML = r.images?.length
+        ? `<a class="fx-thumbs-row" href="${esc(strip.dataset.view)}" target="_blank" rel="noopener" title="Открыть Excel с фото">${r.images.slice(0, 12).map((im) => `<img src="${esc(im.url)}" alt="Фото, лист ${esc(im.sheet)}, строка ${esc(im.row)}" loading="lazy">`).join('')}${r.total > 12 ? `<span class="fx-thumbs-more">+${r.total - 12}</span>` : ''}</a><small class="muted">Фото в Excel: ${r.total}</small>`
+        : '<small class="muted">В этом Excel нет фото.</small>';
+    });
     $$('[data-pick]', box).forEach((c) => c.addEventListener('change', () => { c.checked ? panelPick.add(Number(c.value)) : panelPick.delete(Number(c.value)); showPick(); }));
     showPick();
   }
@@ -409,7 +522,7 @@
       $('.copilot-progress', card).remove();
       const r = await post('/api/agent/attachment', { conversation, token });
       setState('idle');
-      bubble('assistant-bubble', textHtml(r.data.reply || r.data.detail || 'Ошибка'));
+      bubble('assistant-bubble is-md', replyHtml(r.data.reply || r.data.detail || 'Ошибка'));
       question(r.data.question);
       if (r.data.panel) renderPanel(r.data.panel);
       if (speakToggle.checked && (handsFree.checked || voice.active) && r.data.speech) voice.speak(r.data.speech);
@@ -493,6 +606,8 @@
       this.mode = mode; this.active = true; this.stopping = false; this.finalText = ''; this.retries = 0; this.backlog = []; this.finished = false;
       setState('connecting'); say('');
       live.hidden = false; liveFinal.textContent = ''; livePartial.textContent = 'Слушаю…';
+      openDock(); this.liveBubble?.remove();
+      this.liveBubble = bubble('user-bubble copilot-listening', '<span class="copilot-mic-dot" aria-hidden="true"></span><span data-live-final></span><span class="muted" data-live-partial> Слушаю…</span>');
       try { await this.openMic(); await this.connect(); } catch (err) { this.fail(err); }
     },
     async openMic() {
@@ -554,14 +669,16 @@
       const type = m.message_type;
       if (type === 'partial_transcript') {
         livePartial.textContent = m.text ? ` ${m.text}` : '';
+        this.showLive();
         if (m.text && m.text.trim().length > 2 && this.isSpeaking() && !this.echo(m.text)) this.stopSpeaking();
       } else if (type === 'committed_transcript' || type === 'committed_transcript_with_timestamps') {
         const heard = (m.text || '').trim();
         livePartial.textContent = '';
         if (!heard || this.echo(heard)) return;
-        if (this.mode === 'handsfree') { this.deliver(heard); return; }
+        if (this.mode === 'handsfree') { this.dropLive(); this.deliver(heard); this.liveBubble = bubble('user-bubble copilot-listening', '<span class="copilot-mic-dot" aria-hidden="true"></span><span data-live-final></span><span class="muted" data-live-partial> Слушаю…</span>'); return; }
         this.finalText = `${this.finalText} ${heard}`.trim();
         liveFinal.textContent = this.finalText;
+        this.showLive();
         if (this.stopping) this.finish();
       } else if (['auth_error', 'quota_exceeded', 'rate_limited', 'resource_exhausted', 'session_time_limit_exceeded', 'invalid_request', 'input_error', 'transcriber_error', 'error'].includes(type)) {
         const text = { auth_error: 'ElevenLabs не принял ключ — проверьте Настройки › Голос.', quota_exceeded: 'Лимит ElevenLabs исчерпан.', rate_limited: 'Слишком много запросов к ElevenLabs. Подождите минуту.',
@@ -572,6 +689,13 @@
         this.finish();
       }
     },
+    showLive() {
+      if (!this.liveBubble) return;
+      $('[data-live-final]', this.liveBubble).textContent = liveFinal.textContent;
+      $('[data-live-partial]', this.liveBubble).textContent = livePartial.textContent;
+      reveal(this.liveBubble);
+    },
+    dropLive() { this.liveBubble?.remove(); this.liveBubble = null; },
     echo(heard) {
       if (!this.speakingText) return false;
       const norm = (s) => s.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, ' ').trim();
@@ -590,6 +714,7 @@
       this.finished = true;
       const heard = (this.finalText || livePartial.textContent || '').replace('Слушаю…', '').trim();
       this.finalText = '';
+      this.dropLive();
       this.close();
       if (heard) this.deliver(heard); else say('Не расслышала. Попробуйте ещё раз, ближе к микрофону.');
     },
@@ -612,6 +737,7 @@
       $$('.copilot-wave i', mic).forEach((b) => { b.style.transform = ''; });
     },
     close() {
+      if (this.mode === 'handsfree' || !this.finished) this.dropLive();
       this.active = false; this.stopping = true;
       this.stopMic();
       const ws = this.ws; this.ws = null;
@@ -621,6 +747,7 @@
       mic.classList.remove('is-live');
     },
     fail(err) {
+      this.dropLive();
       const messages = { 'mic-denied': 'Нет доступа к микрофону. Safari › Настройки для этого сайта › Микрофон; Chrome — значок слева от адреса › Микрофон. На Mac также: Системные настройки › Конфиденциальность и безопасность › Микрофон › включите браузер.',
         'mic-missing': 'Микрофон не найден. Подключите его или выберите другой в настройках голоса (⚙ в диалоге).', closed: 'Соединение закрыто.' };
       say(messages[err.message] || err.message || 'Голос недоступен. Можно продолжать текстом.', 'danger');
@@ -639,7 +766,9 @@
     async speak(spoken) {
       this.stopSpeaking();
       if (!voiceConfig.configured || !spoken) return;
+      const seq = (this.seq = (this.seq || 0) + 1);
       const r = await post('/api/voice/speech', { text: spoken });
+      if (seq !== this.seq) return;            // a newer reply (or Stop) came while this one was being prepared
       if (!r.data.id) { say(r.data.error || 'Не удалось озвучить ответ.', 'warn'); return; }
       this.speakingText = r.data.text;
       this.audio.src = `/api/voice/speech/${r.data.id}`;
@@ -649,6 +778,7 @@
       try { await this.audio.play(); } catch (err) { if (err.name === 'NotAllowedError') say('Браузер не дал включить звук — нажмите на страницу и повторите.', 'warn'); }
     },
     stopSpeaking() {
+      this.seq = (this.seq || 0) + 1;
       if (!this.audio.paused) this.audio.pause();
       this.audio.removeAttribute('src'); this.audio.load();
       this.speakingText = '';

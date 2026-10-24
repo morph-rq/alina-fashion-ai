@@ -33,14 +33,14 @@ from app.config import settings
 from app.assistant_flow import VOICE_SAFE as VOICE_SAFE_ACTIONS, FlowMixin
 from app.copilot import CopilotMixin
 from app.factory_ledger import compare_snapshots, season_ledger, settlement_summary
-from app.models import (AgentMessage, AgentProposal, AllocationReview, AuditLog, Customer, CustomerPricingRule,
+from app.models import (AgentMessage, AgentProposal, AllocationReview, AuditLog, Brand, Customer, CustomerPricingRule,
                         FactoryAgreement, ImportBatch, Order, OrderItem, Season, SettlementSnapshot)
 
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 MAX_STEPS = 8
 
 SYSTEM = """Ты — помощник владелицы бизнеса по заказам модной одежды у фабрик (бренды Dior, Loro Piana и др.).
-Отвечай по-русски (или по-английски, если пишут по-английски), коротко и просто: владелица не технический специалист.
+Отвечай всегда по-русски (даже если написали на другом языке — ответ озвучивается русским голосом), коротко и просто: владелица не технический специалист.
 
 Правила:
 - Все суммы бери ТОЛЬКО из результатов инструментов. Никогда не считай деньги сам и не придумывай цифры.
@@ -60,6 +60,10 @@ SYSTEM = """Ты — помощник владелицы бизнеса по з�
   original — файл фабрики с колонками цен клиентов). Это файлы-предпросмотр, клиентам ничего не отправляется.
 - Ответ могут озвучить голосом: первая фраза — короткий итог с точной суммой из инструмента, подробности ниже.
   Без таблиц, кода и формул в первой фразе.
+- Статусы называй по-русски: Ordered — заказано, Ready — готово, Cancelled — отменено, Shipped — отправлено.
+- Если propose_changes вернул no_change — скажи, что так уже стоит и менять нечего; не пиши «подготовила» или «сохранено».
+- Таблицы Markdown можно (их видно на экране), но первая фраза — обычный текст без таблиц. Не пиши имена файлов и ссылки:
+  файлы, позиции с фото, расчёты и шаги работы приложение само показывает карточками под ответом.
 Контекст экрана (открытый сезон/бренд/клиент, выделенные строки selected_item_ids, текущая выборка) передаётся
 в сообщении — используй его для «этот», «здесь», «выделенные»."""
 
@@ -343,6 +347,26 @@ def t_navigate(db: Session, p: dict) -> dict:
     if url is None:
         return {"error": f"Нет раздела {p.get('section')}. Есть: {', '.join(NAV)}"}
     query = {k: p[k] for k in ("season", "brand", "customer", "status") if p.get(k)} if url in ("/board", "/factories", "/pricing", "/documents") else {}
+    if url in ("/board", "/factories", "/pricing", "/documents"):
+        try:
+            season = la.find_season(db, query.get("season"))
+        except la.ActionError as exc:
+            return {"error": str(exc)}
+        query["season"] = season.name
+        if query.get("brand"):
+            names = [o.brand.name for o in season.orders]
+            wanted = str(query["brand"]).casefold().strip()
+            exact = [n for n in names if n.casefold().strip() == wanted]
+            close = exact or [n for n in names if wanted in n.casefold()]
+            if len(close) != 1:
+                return {"error": f"Бренд «{query['brand']}» в {season.name} неоднозначен или не найден. Есть: {', '.join(names)}. "
+                                 "Спроси владелицу через ask_user, какой открыть, или открой без бренда."}
+            query["brand"] = close[0]
+        if query.get("customer"):
+            try:
+                query["customer"] = la.find_customer(db, query["customer"]).code
+            except la.ActionError as exc:
+                return {"error": str(exc)}
     if url != "/board":
         query.pop("customer", None), query.pop("status", None)
     return {"navigate": url + ("?" + urlencode(query) if query else "")}
@@ -423,6 +447,16 @@ def run_tool(db: Session, name: str, params: dict, pending: _Pending, screen: di
             preview = la.preview_actions(db, actions)
             if not preview.ok:
                 return {"error": preview.error, "saved": False}
+            if actions and not preview.diff and all(a.get("action") in ("set_customer_markup", "set_item_markup") for a in actions) \
+                    and all(re.search(r"позиций: 0\b", m) for m in preview.messages):
+                empty = [a["params"] for a in actions if a.get("action") == "set_customer_markup" and not _items_in_scope(db, a["params"])]
+                if empty:
+                    where = {p_["customer"]: _customer_brands(db, p_) for p_ in empty}
+                    return {"saved": False, "no_change": True, "no_items": where, "will_do": preview.messages,
+                            "note": "У клиента нет позиций в этом бренде/сезоне — изменять нечего, предложение не создано. "
+                                    "Скажи владелице, в каких брендах у клиента есть позиции, и спроси, туда ли поставить процент."}
+                return {"saved": False, "no_change": True, "will_do": preview.messages,
+                        "note": "Такая наценка уже стоит: ничего не изменится, предложение не создано. Скажи владелице, что менять нечего."}
             pending.summary = params.get("summary") or pending.summary
             pending.actions.extend(actions)
             return {"saved": False, "pending_approval": True, "will_do": preview.messages,
@@ -440,6 +474,40 @@ def run_tool(db: Session, name: str, params: dict, pending: _Pending, screen: di
         return {"error": str(exc)}
     except ValueError as exc:
         return {"error": str(exc)}
+
+
+def _scope_items(db: Session, params: dict):
+    customer = la.find_customer(db, params.get("customer"))
+    query = select(OrderItem).join(Order).where(OrderItem.customer_id == customer.id, OrderItem.status != "Cancelled")
+    if params.get("season"):
+        query = query.where(Order.season_id == la.find_season(db, params["season"]).id)
+    return query
+
+
+def _items_in_scope(db: Session, params: dict) -> int:
+    query = _scope_items(db, params)
+    if params.get("brand"):
+        query = query.join(Brand, Brand.id == Order.brand_id).where(func.lower(Brand.name) == str(params["brand"]).lower())
+    return len(list(db.scalars(query)))
+
+
+def _customer_brands(db: Session, params: dict) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in db.scalars(_scope_items(db, {k: v for k, v in params.items() if k != "brand"})):
+        counts[item.order.brand.name] = counts.get(item.order.brand.name, 0) + 1
+    return counts
+
+
+def no_change_reply(out: dict) -> str:
+    if out.get("no_items"):
+        return " ".join(f"У {code} нет позиций в этом заказе — менять нечего." + (
+            " Её позиции есть в: " + ", ".join(f"{b} ({n})" for b, n in brands.items()) + ". Поставить процент туда?" if brands else "")
+            for code, brands in out["no_items"].items())
+    """ "IDS: 30.00% для «Dior cruise SS27» — изменено позиций: 0" → "У IDS уже 30% для Dior cruise SS27 — менять нечего." """
+    parts = [re.sub(r"^(\S+): ([\d.]+)% для «(.+?)» — .*$", lambda m: f"у {m.group(1)} уже {Decimal(m.group(2)).normalize():f}% для {m.group(3)}", line)
+             for line in out.get("will_do", [])]
+    text = "; ".join(parts) or "так уже стоит"
+    return text[:1].upper() + text[1:] + " — менять нечего, ничего не изменено."
 
 
 def _store_proposal(db: Session, request: str, pending: _Pending, conversation: str | None = None) -> dict | None:
@@ -472,7 +540,11 @@ def proposal_view(proposal: AgentProposal) -> dict:
     return {"id": proposal.public_id, "version": proposal.version, "summary": proposal.summary, "status": proposal.status,
             "will_do": preview.get("messages", []), "diff": preview.get("diff", []), "kind": "import" if plan.get("import") else "change",
             "button_only": bool(plan.get("import")) or any(a.get("action") not in VOICE_SAFE_ACTIONS for a in plan.get("actions", [])),
-            "documents": plan.get("documents", []), "result": result}
+            "documents": plan.get("documents", []), "result": result,
+            # Percentages the owner can change right in the card (sent back as "Нет, AA 30%" — the same correction path as voice).
+            "editable": [{"customer": a["params"].get("customer"), "markup": str(a["params"].get("markup")),
+                          "scope": a["params"].get("brand") or a["params"].get("season") or ""}
+                         for a in plan.get("actions", []) if a.get("action") == "set_customer_markup" and a.get("params", {}).get("customer")]}
 
 
 class ModelClient(Protocol):
@@ -490,11 +562,14 @@ class ClaudeClient:
                     json={"model": model, "max_tokens": 4000, "system": system, "messages": messages, "tools": tools})
                 if response.status_code in (401, 403):
                     raise ValueError("Ключ ИИ не подходит — проверьте Настройки › ИИ.")
+                if response.status_code in (429, 500, 502, 503, 504, 529):
+                    last = httpx.HTTPStatusError(f"HTTP {response.status_code}", request=response.request, response=response)
+                    continue
                 response.raise_for_status()
                 return response.json()
             except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.NetworkError) as exc:
                 last = exc
-        raise ValueError(f"ИИ временно недоступен ({type(last).__name__}). Можно продолжить командами без ИИ.")
+        raise ValueError("ИИ сейчас занят или недоступен" + (f" (HTTP {last.response.status_code})" if isinstance(last, httpx.HTTPStatusError) else "") + ".")
 
 
 def history(db: Session, conversation: str, limit: int = 12) -> list[AgentMessage]:
@@ -537,16 +612,114 @@ def handle(db: Session, conversation: str, text: str, screen: dict | None = None
         if client is None and not settings.active_ai_api_key:
             result = RuleInterpreter(db, conversation, screen).run(text)
         else:
-            result = _llm_turn(db, conversation, text, screen, client or ClaudeClient())
+            # Navigation, "what is open", the file picker, dropped-file follow-ups, workbook rows and the deposit
+            # table have exact rule handlers: they answer in milliseconds, so voice does not wait for the model.
+            result = RuleInterpreter(db, conversation, screen).fast(text)
+            if result is None:
+                try:
+                    result = _llm_turn(db, conversation, text, screen, client or ClaudeClient())
+                except ValueError as exc:
+                    # Claude busy, offline or rejected: answer with the built-in commands instead of an error.
+                    db.rollback()
+                    result = RuleInterpreter(db, conversation, screen).run(text)
+                    result.reply = f"⚠ {exc} Ответила без ИИ:\n\n{result.reply}"
     if result.data is None:
         result.data = memory
     db.add(AgentMessage(conversation=conversation, role="assistant", text=result.reply[:8000],
                         data_json=json.dumps({"proposal": result.proposal, "question": result.question,
-                                              "tools": [c["name"] for c in result.tool_calls], "context": result.data,
+                                              "tools": [c["name"] for c in result.tool_calls], "steps": describe_steps(result.tool_calls),
+                                              "context": result.data,
                                               "panel": result.panel, "speech": result.speech},
                                              ensure_ascii=False, default=str)))
     db.commit()
     return result
+
+
+STATUS_RU = {"Ordered": "заказано", "Ready": "готово", "Cancelled": "отменено", "Shipped": "отправлено", "Delivered": "доставлено"}
+
+
+STEP_LABELS = {
+    "list_brands_and_seasons": "Посмотрела сезоны и бренды", "get_order_details": "Прочитала заказ", "get_customer_allocations": "Прочитала позиции клиента",
+    "get_pricing_rules": "Проверила наценки", "calculate_factory_settlement": "Посчитала предоплаты и долги",
+    "review_ambiguous_allocations": "Нашла неясные строки", "inspect_imports": "Посмотрела загруженные файлы", "compare_revisions": "Сравнила с прошлым",
+    "preview_customer_report": "Проверила, что войдёт в документ", "propose_changes": "Подготовила изменение (не сохранено)",
+    "prepare_documents": "Добавила Excel + PDF к изменению", "select_items": "Выбрала позиции", "export_documents": "Сделала файлы",
+    "check_data": "Проверила суммы", "navigate": "Открыла страницу", "open_file_picker": "Открыла выбор файла",
+    "inspect_workbook": "Прочитала Excel", "compare_uploaded_file": "Сравнила файл с заказами", "ask_user": "Задала вопрос"}
+
+
+def describe_steps(calls: list[dict]) -> list[dict]:
+    """What the assistant actually did this turn, in plain words, from the real tool calls (shown under the reply)."""
+    steps = []
+    for call in calls:
+        name, params, out = call["name"], call.get("input") or {}, call.get("output") or {}
+        bits = [str(params[k]) for k in ("customer", "brand", "season") if isinstance(params.get(k), str) and params.get(k)]
+        if name == "select_items" and out.get("summary"):
+            bits = [out["summary"].replace("Выбрано: ", "")]
+        elif name == "export_documents" and out.get("documents"):
+            bits = [", ".join(f"{d['format'].upper()}{' ' + d['customer'] if d.get('customer') else ''}" for d in out["documents"])]
+        elif name == "propose_changes":
+            bits = [params.get("summary") or ""] if not out.get("no_change") else ["так уже стоит — ничего не меняю"]
+        elif name == "calculate_factory_settlement" and out.get("factory_total"):
+            bits.append(f"фабрике {_eur(out['factory_total'])}")
+        elif name == "navigate" and out.get("navigate"):
+            bits = [out["navigate"].split("?")[0].strip("/") or "обзор"]
+        steps.append({"tool": name, "label": STEP_LABELS.get(name, name), "detail": " · ".join(b for b in bits if b)[:160],
+                      "ok": "error" not in out, "error": out.get("error", "")[:200] if "error" in out else ""})
+    return steps
+
+
+def panels_from_calls(db: Session, calls: list[dict], text: str = "", screen: dict | None = None) -> dict | None:
+    """The same interactive blocks the rule path shows (documents, rows with photos, figures, bars, tables,
+    findings), built from what the model's tools actually returned — never from the model's own text."""
+    from app.copilot import settlement_panel
+    panel: dict = {}
+    # The latest result of each kind wins; a customer's own figures come before season totals.
+    # A customer's own figures come first only when the request is about that customer (named, or open on screen);
+    # "all clients…" keeps the season totals.
+    about = {w.upper() for w in re.findall(r"[A-Za-zА-Яа-яЁё]{2,}", text)} | {str((screen or {}).get("customer") or "").upper()}
+    own = lambda c: c["name"] == "get_customer_allocations" and str((c.get("output") or {}).get("customer", "")).upper() in about
+    for call in sorted(reversed(calls), key=lambda c: not own(c)):
+        out = call.get("output") or {}
+        if "error" in out:
+            continue
+        name = call["name"]
+        if name == "export_documents" and out.get("documents") and "documents" not in panel:
+            panel.update(documents=out["documents"], bundle=out.get("bundle"))
+        elif name == "select_items" and out.get("rows") is not None and "selection" not in panel:
+            panel["selection"] = out
+        elif name == "calculate_factory_settlement" and out.get("customers") is not None and "table" not in panel:
+            panel.update({k: v for k, v in settlement_panel(out).items() if k not in panel})
+        elif name == "get_customer_allocations" and out.get("items") is not None and "figures" not in panel and own(call):
+            total, due, paid = (Decimal(out[k]) for k in ("order_total", "deposit_due", "paid_confirmed"))
+            panel["figures"] = [{"label": f"Заказ {out['customer']}", "value": out["order_total"]},
+                                {"label": "Предоплата", "value": out["deposit_due"]},
+                                {"label": "Оплачено (подтверждено)", "value": out["paid_confirmed"]},
+                                {"label": "Осталось внести", "value": _d(max(due - paid, ZERO))}]
+            panel.setdefault("bars", [{"label": out["customer"], "value": out["deposit_due"], "paid": out["paid_confirmed"]}])
+            if "selection" not in panel:
+                images = {i.id: i.image_path for i in db.scalars(select(OrderItem).where(
+                    OrderItem.id.in_([x["item_id"] for x in out["items"]])))}
+                panel["selection"] = {
+                    "summary": f"{out['customer']} · {out['season']} · {len(out['items'])} поз.",
+                    "customer_total": out["order_total"], "base_total": _d(sum((Decimal(x["base_unit"]) * x["quantity"] for x in out["items"]), ZERO)),
+                    "rows": [{"id": x["item_id"], "image": images.get(x["item_id"]), "name": x["name"], "article": x["article"],
+                              "brand": x.get("brand"), "color": x["color"], "customer": x["customer"], "size": x["size"],
+                              "quantity": x["quantity"], "total": x["customer_line_total"], "status": STATUS_RU.get(x["status"], x["status"])}
+                             for x in out["items"]]}
+        elif name == "get_order_details" and out.get("items") and "selection" not in panel:
+            items = [x for x in out["items"] if x.get("status") != "Cancelled"]
+            images = {i.id: i.image_path for i in db.scalars(select(OrderItem).where(OrderItem.id.in_([x["item_id"] for x in items])))}
+            panel["selection"] = {
+                "summary": f"{out.get('brand') or 'Заказ'} · {len(items)} поз.",
+                "customer_total": _d(sum((Decimal(x["customer_line_total"]) for x in items), ZERO)),
+                "base_total": _d(sum((Decimal(x["base_unit"]) * x["quantity"] for x in items), ZERO)),
+                "rows": [{"id": x["item_id"], "image": images.get(x["item_id"]), "name": x["name"], "article": x["article"], "brand": out.get("brand"),
+                          "color": x["color"], "customer": x["customer"], "size": x["size"], "quantity": x["quantity"],
+                          "total": x["customer_line_total"], "status": STATUS_RU.get(x["status"], x["status"])} for x in items[:200]]}
+        elif name == "check_data" and out.get("findings") and "findings" not in panel:
+            panel["findings"] = out["findings"][:60]
+    return panel or None
 
 
 def _llm_turn(db: Session, conversation: str, text: str, screen: dict, client: ModelClient) -> TurnResult:
@@ -592,15 +765,7 @@ def _llm_turn(db: Session, conversation: str, text: str, screen: dict, client: M
     proposal = _store_proposal(db, text, pending, conversation)
     if question and not reply:
         reply = question["question"]
-    panel = None
-    for call in reversed(calls):
-        output = call.get("output") or {}
-        if call["name"] == "export_documents" and output.get("documents"):
-            panel = {"documents": output["documents"], "bundle": output.get("bundle")}
-            break
-        if call["name"] == "select_items" and output.get("rows") is not None:
-            panel = {"selection": output}
-            break
+    panel = panels_from_calls(db, calls, text, screen)
     context = memory_of(db, conversation)
     for call in calls:
         if call["name"] in ("select_items", "export_documents") and (call.get("output") or {}).get("filters") is not None:
@@ -672,7 +837,7 @@ def _commit_import(db: Session, proposal: AgentProposal, plan: dict, actor: str)
         raise ValueError("Данные изменились после сравнения — попросите сравнить файл ещё раз.")
     undo = la.capture_state(db, fresh)
     original = store_original(Path(status["workbook"]), analysis.sha256, Path(analysis.filename).stem + Path(status["workbook"]).suffix)
-    result = revision.apply(db, analysis, original, diff, create_unknown=bool(spec.get("create_unknown")),
+    result = revision.apply(db, analysis, original, diff, create_unknown=bool(spec.get("create_unknown")), owner=spec.get("owner"),
                             cancel_missing=bool(spec.get("cancel_missing")), actor=actor)
     _write_status(spec["token"], state="committed", batch_id=result.get("batch_id"), message="Сохранено в учёт (через ассистента)")
     proposal.status, proposal.decided_at = "committed", datetime.now(timezone.utc)
@@ -698,6 +863,25 @@ def cancel_proposal(db: Session, public_id: str) -> None:
 
 def _eur(value) -> str:
     return f"€{Decimal(value):,.2f}".replace(",", " ")
+
+
+HELP = re.compile(r"что (ты )?(умеешь|можешь)|чем (ты )?(можешь )?помочь|^\s*(помощь|справка|help)\s*[?!.]*$|"
+                  r"what can \w{1,4} do|what (do|can) (you|u)\b|how can (you|u) help|^\s*commands?\s*[?!.]*$", re.I)
+CAPABILITIES = (
+    "Вот что я умею (голосом или текстом):\n"
+    "• Открывать: «Открой Dior Cruise», «Покажи все заказы IDS», «Что сейчас открыто?»\n"
+    "• Считать: «Сколько каждая должна заплатить?», «Сколько мы должны фабрике?», «Сколько стоит это?» (о выделенных строках)\n"
+    "• Менять цены: «Поставь IDS 35%», «AA 30%, IDS 35%» — сначала покажу «было / станет», сохраняю только после «Да, сохрани»\n"
+    "• Оплаты: «AA оплатила €5000» — уточню, пришли ли деньги; сохраняю только кнопкой\n"
+    "• Документы: «Сделай Excel и PDF для IDS», «А теперь то же самое для AA» — с фото, размерами и ценами, без чужих данных\n"
+    "• Файлы фабрики: перетащите Excel или PDF сюда или скажите «Открой загрузку» — прочитаю, сравню с заказами и покажу изменения до импорта\n"
+    "• Большие таблицы: «Какие листы в файле?», «Покажи строки 1–40»\n"
+    "• Проверка: «Проверь суммы — что не совпадает?», «Что изменилось с 1 октября?»\n"
+    "• Отмена: «Отмени последнее изменение»\n"
+    "Сейчас ИИ не подключён, поэтому я понимаю команды по-русски, похожие на эти. "
+    "С ключом ИИ (Настройки) можно говорить как угодно и на любом языке.")
+CAPABILITIES_SPOKEN = ("Я открываю заказы, считаю предоплаты и долги, меняю наценки после вашего подтверждения, "
+                       "делаю Excel и PDF для клиентов и читаю файлы фабрики. Список примеров — на экране.")
 
 
 class RuleInterpreter(CopilotMixin, FlowMixin):
@@ -784,13 +968,48 @@ class RuleInterpreter(CopilotMixin, FlowMixin):
                        "last_markup": context.get("last_markup", self.memory.get("last_markup"))}
         return TurnResult(reply, self.calls, proposal, question, context, panel, speech, client)
 
+    def fast(self, text: str) -> TurnResult | None:
+        """Only the commands the rules handle exactly; None lets the language model answer."""
+        self.text = text
+        try:
+            try:
+                self.season(text)
+            except la.ActionError:
+                if not self.memory.get("attachment"):
+                    return None
+                # An empty app: the first dropped file creates the season, so its follow-up must still run.
+            flowed = self.copilot_flow(text)
+            if flowed is not None:
+                return flowed
+            lowered = text.casefold()
+            # "Поставь ей 30%" / "IDS 35%": exact markup proposals from the rules (about 0.2 s instead of a model round trip).
+            if re.search(r"\d\s?%", text) and not re.search(r"фабрик|(?<!пред)оплат|\?|excel|pdf|эксел|пдф|документ|выдел|отчёт|отчет", lowered):
+                if not self.percent_pairs(text):
+                    who = self.screen.get("customer") or (lambda c: c[0] if len(c) == 1 else None)(
+                        (self.memory.get("selection") or {}).get("customers") or []) or self.memory.get("customer")
+                    pronoun = re.compile(r"\b(ей|ему|ней|неё|нее|её|ее|этой|этому|ним|клиентке|клиенту)\b", re.I)
+                    if who and pronoun.search(text):
+                        text = pronoun.sub(who, text, count=1)
+                if self.percent_pairs(text):
+                    return self.run(text)
+            return None
+        except la.ActionError:
+            return None
+
     def run(self, text: str) -> TurnResult:
         self.text = text
         lowered = text.casefold()
         try:
             season = self.season(text)
         except la.ActionError as exc:
-            return TurnResult(str(exc))
+            if self.memory.get("attachment"):          # empty app + a dropped file: let the file create the season
+                try:
+                    flowed = self.copilot_flow(text)
+                except la.ActionError as inner:
+                    return self.done(str(inner), None, self.memory)
+                if flowed is not None:
+                    return flowed
+            return TurnResult(str(exc) + " Перетащите файл фабрики на строку ассистента — я создам сезон из него.")
         try:
             flowed = self.copilot_flow(text)
             if flowed is None:
@@ -799,6 +1018,8 @@ class RuleInterpreter(CopilotMixin, FlowMixin):
             return self.done(str(exc), None, self.memory)
         if flowed is not None:
             return flowed
+        if HELP.search(lowered):
+            return self.done(CAPABILITIES, None, self.memory, speech=CAPABILITIES_SPOKEN)
         brand = self.brand(text, season)
         context = {"season": season.name, "brand": brand}
         customers = self.customers(text)
@@ -949,17 +1170,31 @@ class RuleInterpreter(CopilotMixin, FlowMixin):
                                  if rows else "Все строки распределены по клиентам.", None, context)
         except la.ActionError as exc:
             return self.done(str(exc), None, context)
-        return self.done("Я понимаю, например: «IDS 35%, AA 30%», «Сколько мы должны фабрике?», «Сколько каждый должен внести?», "
-                         "«AA оплатила €5000», «Сделай Excel и PDF для IDS», «Что изменилось с 2026-10-01». "
-                         "Подключите ИИ в Настройках — тогда можно писать как угодно.", None, context)
+        latin = len(re.findall(r"[a-z]", lowered)) > len(re.findall(r"[а-яё]", lowered))
+        return self.done(f"Не поняла: «{text.strip()[:120]}». "
+                         + ("Без подключённого ИИ я понимаю только команды по-русски. " if latin else "")
+                         + "Например: «Открой Dior Cruise», «IDS 35%», «Сколько каждая должна внести?», «Сделай Excel и PDF для IDS». "
+                         "Спросите «Что ты умеешь?» — покажу всё. Подключите ИИ в Настройках, тогда можно писать как угодно и на любом языке.",
+                         None, context, speech="Не поняла. Скажите, например, «Открой Dior Cruise» или спросите, что я умею.")
 
     def _proposal_reply(self, out: dict, context: dict) -> TurnResult:
         if "error" in out:
             return self.done(out["error"], None, context)
+        if out.get("no_change"):
+            return self.done(no_change_reply(out), None, context, speech=no_change_reply(out))
         lines = out.get("will_do", [])
-        impact = [f"{r['label']}: {_eur(r['before'])} → {_eur(r['after'])}" for r in out.get("financial_impact", [])]
+        rows = out.get("financial_impact", [])
+        impact = [f"{r['label']}: {_eur(r['before'])} → {_eur(r['after'])}" for r in rows]
+        # Spoken: only the customers' own figures (order, deposit), not the whole season table.
+        own = [r for r in rows if re.match(r"(Заказ \S+|\S+: предоплата)$", r["label"])][:4]
+        if not rows:
+            speech = "Это ничего не изменит: суммы останутся прежними. Подробности на экране."
+        else:
+            speech = "Проверьте. " + "; ".join(f"{r['label']}: было {_eur(r['before'])}, станет {_eur(r['after'])}" for r in (own or rows[:2])) \
+                + ". Сохранить?"
         return self.done("Предлагаю:\n" + "\n".join(f"• {l}" for l in lines)
-                         + ("\n\nВлияние на суммы:\n" + "\n".join(impact) if impact else "") + "\n\nСохранить?", None, context)
+                         + ("\n\nВлияние на суммы:\n" + "\n".join(impact) if impact else "\n\nСуммы не изменятся.") + "\n\nСохранить?",
+                         None, context, speech=speech)
 
 
 def _since(text: str) -> date:

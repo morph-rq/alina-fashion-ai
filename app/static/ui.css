@@ -270,7 +270,7 @@ tr.cancelled td:first-child { box-shadow: inset 3px 0 0 var(--line-strong); }
 .swatch::before { content: ""; width: 11px; height: 11px; border-radius: 3px; flex: 0 0 auto; }
 .swatch.process::before, .state-dot.process { background: var(--saffron); }
 .swatch.done::before, .state-dot.done { background: var(--sage); }
-.swatch.pending::before, .state-dot.pending { background: #fff; border: 1.5px dashed var(--chalk-line); }
+.swatch.pending::before, .state-dot.pending { background: var(--danger); }
 .state-dot { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12.5px; }
 
@@ -284,7 +284,7 @@ tr.cancelled td:first-child { box-shadow: inset 3px 0 0 var(--line-strong); }
 .tone-danger, .state-failed, .state-missing, .check-pill.bad { background: var(--danger-soft); color: var(--danger); }
 .state-conflicting { background: #f8e3ef; color: #8a1a5b; }
 .tone-neutral, .state-collecting, .state-captured, .state-queued, .state-defaulted, .state-ignored, .status-pill.pending { background: var(--sunken); color: var(--ink-2); }
-.status-pill.pending { background: #fff; box-shadow: inset 0 0 0 1.5px var(--chalk-line); }
+.status-pill.pending { background: var(--danger-soft); color: var(--danger); }
 .count-badge { background: var(--ink); color: #fff; }
 
 /* ---------- Notices ---------- */
@@ -467,7 +467,7 @@ dialog.drawer::backdrop { background: rgba(28, 33, 48, .34); }
 .ws-section-head h2::before { content: ""; width: 13px; height: 13px; border-radius: 4px; }
 .ws-section.process .ws-section-head h2::before { background: var(--saffron); }
 .ws-section.done .ws-section-head h2::before { background: var(--sage); }
-.ws-section.pending .ws-section-head h2::before { background: #fff; border: 1.5px dashed var(--chalk-line); }
+.ws-section.pending .ws-section-head h2::before { background: var(--danger); }
 .ws-section-head span { color: var(--muted); font-size: 13px; }
 .wb-table .check-col, .wb-table td.check { width: 36px; padding-right: 0; }
 .wb-group-row th { background: var(--surface-2) !important; font-weight: 600; font-size: 13px; padding-top: 8px !important; padding-bottom: 8px !important; }
@@ -850,3 +850,22 @@ details > summary { cursor: pointer; }
 /* A row or card reached from search or a link (#product-N, #group-N) is marked. */
 tr:target > td, tr:target > th { background: var(--cobalt-soft); }
 .group-card:target, .panel:target { box-shadow: 0 0 0 2px var(--cobalt); }
+
+/* ---------- Upload check ---------- */
+.check-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 22px; }
+.check-tile { display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; border-radius: var(--r); background: var(--surface); border: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.check-tile strong { font-size: 26px; line-height: 1.1; }
+.check-tile span { font-size: 13px; color: inherit; opacity: .85; }
+.check-tile:hover { text-decoration: none; border-color: var(--line-strong); }
+.check-tile.tone-danger { border-color: #efc1bb; }
+.check-tile.tone-warn { border-color: #efd598; }
+.check-tile.tone-ok { border-color: #b9dcc6; }
+.wb-table tr.state-row.pending td:first-child, .wb-table tr.tone-row.error td:first-child { box-shadow: inset 4px 0 0 var(--danger); }
+.wb-table tr.state-row.process td:first-child, .wb-table tr.tone-row.warning td:first-child { box-shadow: inset 4px 0 0 var(--saffron); }
+.wb-table tr.state-row.done td:first-child, .wb-table tr.tone-row.resolved td:first-child { box-shadow: inset 4px 0 0 var(--sage); }
+.wb-table tr.state-row.pending, .wb-table tr.tone-row.error { background: #fdf4f2; }
+.wb-table tr.state-row.process, .wb-table tr.tone-row.warning { background: #fffaeb; }
+.wb-table tr.state-row.done, .wb-table tr.tone-row.resolved { background: #f3faf5; }
+.wb-table td.wrap { white-space: normal; min-width: 220px; }
+.wb-table td.wrap .badge { white-space: normal; margin: 0 4px 4px 0; }
+@media (max-width: 720px) { .check-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

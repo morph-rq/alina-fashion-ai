@@ -14,7 +14,7 @@ tests; **no real Google account has been connected**.
   repository now records every stage (`git log`); business data is git-ignored.
 * Test baseline: 108 passed, 1 failed (outdated library assertion). With the workspace `.env` credentials
   most route tests returned 401; `tests/conftest.py` now isolates settings, database, secrets and folders.
-* Run tests: `& ..\alina-fashion\.venv\Scripts\python.exe -m pytest -q` (now **257 passed**).
+* Run tests: `& ..\alina-fashion\.venv\Scripts\python.exe -m pytest -q` (now **263 passed**).
 * Visual preview without login or live services: `python scripts\dev_preview.py` (127.0.0.1:8001 only), or
   `python scripts\ui_preview.py` for a throw-away copy in `tmp/ui-preview` with synthetic records.
 
@@ -126,8 +126,28 @@ in-place edits.
   `docs/navigation-guide.md`.
 * Fixed on the way: stale intake receipt balances, Enter in intake questions, empty factory-order list,
   shipment rule checkbox that could not be switched off, server error on a damaged image upload.
-* Open: System Check fails for an order without a Brand + Season rule (shown on Overview, backend unchanged);
-  payments, shipments and expenses still go to the newest season by design.
+* Payments, shipments and expenses still go to the newest season by design.
+
+## Upload check, colours and cost corrections (2026-10-24)
+
+* **Upload check** `/imports/{id}/check` (`app/upload_check.py`, `upload_check.html`): after a master workbook
+  upload the app opens a page listing every problem of that file: open customer splits, source notes, protected
+  changes and the product checks System Check runs (no customer, missing price/size, markup exception, total
+  mismatch, Ready/shipment gaps). Each has a fix link; product edits return to the check. Products from the file
+  are listed with their colour, filters (all / with problems / each colour) and bulk *Mark as*. **Export check
+  to Excel** writes a coloured Problems + Products workbook; **Save check to Drive** queues it through the
+  verified outbox. Also reachable from Excel & statements › *Check the last upload* and each import history row.
+* Colours: *Not completed* is now **red** (was white) in the worksheet, legends and the editable Excel export;
+  In process stays yellow, Done green. The label text is unchanged so Excel round trips keep working.
+* A master workbook that cannot be read now shows the reason on the import page and keeps nothing (was a server
+  error). Re-uploading the same file opens the earlier check instead of importing twice.
+* Shipment costs (date, status, fixed/suitcase/bag, rule or own transport %) and exceptional expenses can be
+  corrected after saving (Ready & shipping › *Edit costs* / *Edit*), each field audited, negatives refused.
+* Fixed: System Check crashed for an order without a Brand + Season rule; it now reports `MISSING_BRAND_RULE`
+  (warning, links to Rules) and uses the default rule. Product checks are shared via `validation.item_issues`.
+* Checked: 263 tests; in the isolated preview (synthetic upload) the check page, bulk marking (6 products →
+  In process, returned with "Updated 6"), Excel export (200, xlsx) and the cost drawer on desktop; the check page
+  on a 375 px phone without sideways scrolling. Saving the check to a real Drive was not tested (no account).
 
 ## Remaining work and decisions
 

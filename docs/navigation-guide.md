@@ -19,6 +19,14 @@ Less frequent tools are behind the gear (**Settings** `/settings`), grouped as B
 Connections (Google Drive and Gmail, captured sources), Recovery (backups and restore, clean-up and reset) and
 History and checks (audit history, System Check, imports and protected changes).
 
+## After uploading a workbook
+
+The app opens **Upload check** for that file. Red = needs fixing / not done, yellow = to check / in process,
+green = resolved / done. Use the fix button on each problem (customer splits, source notes, product facts),
+select products and **Mark as** a colour, and **Export check to Excel** or **Save check to Drive**. Come back
+later through **Excel & statements › Check the last upload**. Shipment and expense amounts can be corrected in
+**Ready & shipping** with **Edit costs**.
+
 ## Where the former tabs are now
 
 | Former tab or menu item | Now | Old link |

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.calculations import signed_payment_amount, ZERO, item_amounts, money
 from app.models import AllocationReview, Expense, FactoryPayment, ImportReview, Order, OrderItem, Payment, PaymentAllocation, ReadyBatch, Season, Shipment, ShipmentItem
-from app.services import client_initial_charges, country_is_transport_exempt, customer_ready_due, dashboard_data, factory_initial_due, factory_ready_due, item_transport_fee, order_rule, order_summary, ready_collection_status
+from app.services import DEFAULT_RULE, client_initial_charges, country_is_transport_exempt, customer_ready_due, dashboard_data, factory_initial_due, factory_ready_due, item_transport_fee, order_rule, order_summary, ready_collection_status
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,35 @@ class ValidationReport:
         return not self.errors
 
 
+def item_issues(item: OrderItem, order: Order, rule=None) -> list[ValidationIssue]:
+    """Product-level checks shared by System Check and the per-upload check page."""
+    rule = rule or order_rule(order)
+    if item.status == "Cancelled":
+        return []
+    entity = f"{order.brand.name} / {item.source_sheet or '-'} row {item.source_row or item.id}"
+    found: list[ValidationIssue] = []
+    if item.quantity <= 0:
+        found.append(ValidationIssue("error", "INVALID_QUANTITY", f"Quantity is {item.quantity}", entity))
+    if item.customer_id is None or item.allocation_status != "Allocated":
+        found.append(ValidationIssue("error", "UNALLOCATED_PRODUCT", "Product is not confidently allocated to a customer", entity))
+    if item.wholesale_unit_price is None or item.wholesale_unit_price <= ZERO:
+        found.append(ValidationIssue("warning", "MISSING_PRICE", "Missing or zero price", entity))
+    if not item.size:
+        found.append(ValidationIssue("warning", "MISSING_SIZE", "Missing size", entity))
+    rule_markup = getattr(rule, "markup_percentage", None)
+    if rule_markup is not None and item.markup_percentage != rule_markup:
+        found.append(ValidationIssue("warning", "MARKUP_EXCEPTION", f"Item uses {item.markup_percentage}; season rule is {rule_markup}", entity))
+    if item.shipment_link and not item.ready_batch_id:
+        found.append(ValidationIssue("error", "SHIPPED_WITHOUT_READY_BATCH", "Shipment item has no Ready batch", entity))
+    if item.status == "Ready" and not item.ready_batch_id:
+        found.append(ValidationIssue("error", "READY_WITHOUT_BATCH", "Ready product has no Ready 1 / Ready 2 / ... batch", entity))
+    if item.status in {"Assigned to shipment", "In transit", "Arrived", "Delivered"} and not item.shipment_link:
+        found.append(ValidationIssue("error", "SHIPPED_WITHOUT_SHIPMENT", "Shipped status has no shipment", entity))
+    if item.source_total is not None and abs(item_amounts(item).base - item.source_total) > Decimal("0.01"):
+        found.append(ValidationIssue("warning", "ITEM_TOTAL_DISCREPANCY", f"Calculated base {item_amounts(item).base} differs from source {item.source_total}", entity))
+    return found
+
+
 def validate_system(session: Session) -> ValidationReport:
     issues: list[ValidationIssue] = []
     orders = session.scalars(select(Order).options(
@@ -50,6 +79,8 @@ def validate_system(session: Session) -> ValidationReport:
         amounts = order_summary(order).amounts
         rule = order_rule(order)
         entity = f"{order.brand.name} / {order.season.name}"
+        if rule is DEFAULT_RULE:
+            issues.append(ValidationIssue("warning", "MISSING_BRAND_RULE", "No Brand + Season rule; default 50/50 and 5% transport are used", entity, "/rules", "Open rules"))
         if money(rule.initial_prepayment_percentage + rule.ready_balance_percentage) != Decimal("1.00"):
             issues.append(ValidationIssue("error", "INCORRECT_PREPAYMENT_RULE", "Initial and Ready percentages do not total 100%", entity))
         if rule.transport_percentage < ZERO or rule.transport_percentage > Decimal("1"):
@@ -67,27 +98,7 @@ def validate_system(session: Session) -> ValidationReport:
         if order.source_total is not None and abs(amounts.final - order.source_total) > Decimal("0.01"):
             issues.append(ValidationIssue("warning", "SOURCE_TOTAL_MISMATCH", f"Calculated {amounts.final} does not match source {order.source_total}", entity))
         for item in order.items:
-            item_entity = f"{order.brand.name} / {item.source_sheet or '-'} row {item.source_row or item.id}"
-            if item.status == "Cancelled":
-                continue
-            if item.quantity <= 0:
-                issues.append(ValidationIssue("error", "INVALID_QUANTITY", f"Quantity is {item.quantity}", item_entity))
-            if item.customer_id is None or item.allocation_status != "Allocated":
-                issues.append(ValidationIssue("error", "UNALLOCATED_PRODUCT", "Product is not confidently allocated to a customer", item_entity))
-            if item.wholesale_unit_price is None or item.wholesale_unit_price <= ZERO:
-                issues.append(ValidationIssue("warning", "MISSING_PRICE", "Missing or zero price", item_entity))
-            if not item.size:
-                issues.append(ValidationIssue("warning", "MISSING_SIZE", "Missing size", item_entity))
-            if item.markup_percentage != rule.markup_percentage:
-                issues.append(ValidationIssue("warning", "MARKUP_EXCEPTION", f"Item uses {item.markup_percentage}; season rule is {rule.markup_percentage}", item_entity))
-            if item.shipment_link and not item.ready_batch_id:
-                issues.append(ValidationIssue("error", "SHIPPED_WITHOUT_READY_BATCH", "Shipment item has no Ready batch", item_entity))
-            if item.status == "Ready" and not item.ready_batch_id:
-                issues.append(ValidationIssue("error", "READY_WITHOUT_BATCH", "Ready product has no Ready 1 / Ready 2 / ... batch", item_entity))
-            if item.status in {"Assigned to shipment", "In transit", "Arrived", "Delivered"} and not item.shipment_link:
-                issues.append(ValidationIssue("error", "SHIPPED_WITHOUT_SHIPMENT", "Shipped status has no shipment", item_entity))
-            if item.source_total is not None and abs(item_amounts(item).base - item.source_total) > Decimal("0.01"):
-                issues.append(ValidationIssue("warning", "ITEM_TOTAL_DISCREPANCY", f"Calculated base {item_amounts(item).base} differs from source {item.source_total}", item_entity))
+            issues.extend(item_issues(item, order, rule))
 
     for item_id, count in session.execute(select(ShipmentItem.order_item_id, func.count()).group_by(ShipmentItem.order_item_id).having(func.count() > 1)).all():
         issues.append(ValidationIssue("error", "DUPLICATE_SHIPMENT", f"Item appears in {count} shipments", f"Item {item_id}"))
@@ -285,7 +296,7 @@ def issue_actions(session, orders, issues):
         tip = tips.get(code, 'Compare this record with the source and correct the confirmed facts. No automatic repair or payment is assumed.')
         if code == 'ALLOCATION_REVIEW_OPEN': url = '/source-reviews?kind=allocation'
         elif code == 'IMPORT_REVIEW_OPEN': url = '/source-reviews?kind=import'
-        elif code in {'INCORRECT_PREPAYMENT_RULE','INCORRECT_TRANSPORT_RULE','NEGATIVE_SPECIAL_COST','UNSUPPORTED_READINESS_LOGIC'}:
+        elif code in {'MISSING_BRAND_RULE','INCORRECT_PREPAYMENT_RULE','INCORRECT_TRANSPORT_RULE','NEGATIVE_SPECIAL_COST','UNSUPPORTED_READINESS_LOGIC'}:
             url,tip = '/rules','Check the Brand + Season rule. Initial and remaining goods payments must total 100%; shipment transport is separate.'
         elif 'SHIPMENT' in code or code in {'INCORRECT_TRANSPORT','NEGATIVE_TRANSPORT_COST','SWITZERLAND_TRANSPORT'}:
             url,tip = '/shipments','Check the shipment, its products, dates and destination. Correct logistics through the shipment workflow.'

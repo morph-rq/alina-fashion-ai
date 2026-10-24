@@ -99,6 +99,7 @@ form (field names, hidden `next`, defaults), **T** = automated test, **R** = red
 | Create Ready batch | `POST /ready-batches` | Ready & shipping → New | Workspace | H |
 | Ready batch ledger | `/ready-batches` | Ready & shipping | Workspace | B |
 | Shipments (rule/explicit transport, CH exemption, fixed/suitcase/bag) | `/shipments`, `POST /shipments` | Ready & shipping | Workspace | B H R (own 7 % rate stored when "use the rule" is off) |
+| Correct shipment costs / exceptional expenses | `POST /shipments/{id}/costs`, `POST /expenses/{id}` | Ready & shipping › Edit costs / Edit | Workspace | B T |
 | Exceptional expenses | `POST /expenses` | Ready & shipping | Workspace | H |
 | Distributors, shipment groups, group settings, dispatch | `/groups`, `POST /distributors`, `/groups…` | Ready & shipping › Groups | Workspace | H R (dispatch refusal for ineligible products shown on a readable page) |
 | Customer payments / refunds ledger | `/payments`, `POST /payments` | Workspace › Money | Workspace | B H T R |
@@ -113,6 +114,7 @@ form (field names, hidden `next`, defaults), **T** = automated test, **R** = red
 | Upload edits → preview → apply | `/excel`, `POST /excel/preview`, `POST /excel/apply` | Excel page (Workspace) | Workspace Excel menu | H T (edited colour visible in the worksheet) |
 | Season / business / collection workbooks | `/exports/…` | Excel menu, library | Workspace | H T |
 | Master workbook import, history, Import Review, protected changes, source delete | `/import`, `POST /import`, `/imports/…` | Workspace Excel menu → Import original master workbook; Settings → Imports and protected changes | Workspace | B T |
+| Upload check: problems of one upload, colour filters, bulk mark, coloured Excel export, save to Drive | `/imports/{id}/check`, `/imports/{id}/check.xlsx`, `POST /imports/{id}/check/drive`, `/imports/latest/check` | Opens after an upload; Excel menu → Check the last upload; import history | Workspace | B T |
 | Library: collections, files, brand/catalog/product links | `/library…` | Settings › Business | Settings | B T |
 
 ### Business helper and administration

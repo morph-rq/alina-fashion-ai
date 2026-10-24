@@ -67,6 +67,7 @@
     <a class="menu-item" role="menuitem" href="/reports{% if season %}?season={{ season.name|urlencode }}{% endif %}">{{ icon('customers') }}<span>More statement options<small>Single customers and Ready batches</small></span></a>
     <div class="menu-sep" role="separator"></div>
     <a class="menu-item" role="menuitem" href="/import">{{ icon('upload') }}<span>Import original master workbook<small>The SS26 source layout, with review of changes</small></span></a>
+    <a class="menu-item" role="menuitem" href="/imports/latest/check">{{ icon('check') }}<span>Check the last upload<small>Every problem in the file, colour-coded, with fixes and export</small></span></a>
   </div>
 </details>
 {%- endmacro %}

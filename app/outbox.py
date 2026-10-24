@@ -71,6 +71,19 @@ def queue_exports(db: Session, connection: Connection) -> int:
     return count
 
 
+def queue_named_export(db: Session, filename: str, content: bytes) -> OutboxItem:
+    """Queue one generated workbook (e.g. an upload check) for the first active exports folder."""
+    destination = _destination(db, None, "drive_outputs")
+    if destination is None:
+        raise ValueError("Connect Google Drive and add an exports folder in Settings › Connections first.")
+    folder = OUTBOX_DIR / "exports"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", filename)
+    path = folder / f"{now():%Y%m%dT%H%M%SZ}-{safe}"
+    path.write_bytes(content)
+    return _queue_file(db, destination, "export", path)
+
+
 def _resolve(item: OutboxItem) -> Path:
     path = Path(item.local_path)
     return path if path.is_absolute() else ROOT_DIR / path

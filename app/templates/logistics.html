@@ -57,16 +57,46 @@
     {% if season %}<div class="btn-row"><button class="btn sm" type="button" data-open="new-shipment">New shipment</button><button class="btn sm quiet" type="button" data-open="new-expense">Record expense</button></div>{% endif %}</div>
   {% if season and not is_newest %}<div class="notice warn"><span class="notice-icon" aria-hidden="true">!</span><div><strong>New shipments and expenses are recorded in {{ newest.name }}, the newest season.</strong><p>This list shows {{ season.name }}. <a href="/logistics?season={{ newest.name|urlencode }}&amp;focus=shipments">Switch to {{ newest.name }}</a> to add one.</p></div></div>{% endif %}
   <div class="table-frame"><table class="table">
-    <thead><tr><th>Shipment</th><th>Date</th><th>Status</th><th class="num">Items</th><th class="num">Merchandise</th><th>Transport source</th><th class="num">Transport</th><th class="num">Fixed, suitcase, bag</th><th class="num">Total fees</th></tr></thead>
-    <tbody>{% for row in summaries %}<tr><th>{{ row.shipment.name }}{% if row.shipment.destination_country_code %}<small>to {{ row.shipment.destination_country_code }}</small>{% endif %}</th><td>{{ row.shipment.date or '—' }}</td><td><span class="badge">{{ row.shipment.status }}</span></td><td class="num">{{ row.shipment.items|length }}</td><td class="num">{{ row.merchandise_value|money }}</td><td>{{ 'Brand + Season rule' if row.shipment.use_rule_transport else (row.shipment.transport_percentage|percent) ~ ' set on shipment' }}</td><td class="num">{{ row.transport_fee|money }}</td><td class="num">{{ row.fixed_costs|money }}</td><td class="num">{{ row.total_fees|money }}</td></tr>
-    {% else %}<tr class="table-empty"><td colspan="9">No shipments{% if season %} in {{ season.name }}{% endif %} yet.</td></tr>{% endfor %}</tbody>
+    <thead><tr><th>Shipment</th><th>Date</th><th>Status</th><th class="num">Items</th><th class="num">Merchandise</th><th>Transport source</th><th class="num">Transport</th><th class="num">Fixed, suitcase, bag</th><th class="num">Total fees</th><th class="actions"><span class="sr-only">Edit</span></th></tr></thead>
+    <tbody>{% for row in summaries %}<tr><th>{{ row.shipment.name }}{% if row.shipment.destination_country_code %}<small>to {{ row.shipment.destination_country_code }}</small>{% endif %}</th><td>{{ row.shipment.date or '—' }}</td><td><span class="badge">{{ row.shipment.status }}</span></td><td class="num">{{ row.shipment.items|length }}</td><td class="num">{{ row.merchandise_value|money }}</td><td>{{ 'Brand + Season rule' if row.shipment.use_rule_transport else (row.shipment.transport_percentage|percent) ~ ' set on shipment' }}</td><td class="num">{{ row.transport_fee|money }}</td><td class="num">{{ row.fixed_costs|money }}</td><td class="num">{{ row.total_fees|money }}</td><td class="actions"><button class="btn sm quiet" type="button" data-open="edit-shipment-{{ row.shipment.id }}">{{ ui.icon('edit') }}Edit costs</button></td></tr>
+    {% else %}<tr class="table-empty"><td colspan="10">No shipments{% if season %} in {{ season.name }}{% endif %} yet.</td></tr>{% endfor %}</tbody>
   </table></div>
   <h3 style="margin:18px 0 8px">Exceptional expenses</h3>
   <div class="table-frame"><table class="table">
-    <thead><tr><th>Type</th><th>Shipment</th><th>Order</th><th>Customer</th><th>Note</th><th class="num">Amount</th></tr></thead>
-    <tbody>{% for expense in expenses %}<tr><td>{{ expense.type }}</td><td>{{ expense.shipment.name if expense.shipment else '—' }}</td><td>{{ expense.order.brand.name if expense.order else '—' }}</td><td>{{ expense.customer.code if expense.customer else 'Shared by value' }}</td><td class="text">{{ expense.note or '—' }}</td><td class="num">{{ expense.amount|money }}</td></tr>
-    {% else %}<tr class="table-empty"><td colspan="6">No exceptional expenses recorded.</td></tr>{% endfor %}</tbody>
+    <thead><tr><th>Type</th><th>Shipment</th><th>Order</th><th>Customer</th><th>Note</th><th class="num">Amount</th><th class="actions"><span class="sr-only">Edit</span></th></tr></thead>
+    <tbody>{% for expense in expenses %}<tr><td>{{ expense.type }}</td><td>{{ expense.shipment.name if expense.shipment else '—' }}</td><td>{{ expense.order.brand.name if expense.order else '—' }}</td><td>{{ expense.customer.code if expense.customer else 'Shared by value' }}</td><td class="text">{{ expense.note or '—' }}</td><td class="num">{{ expense.amount|money }}</td><td class="actions"><button class="btn sm quiet" type="button" data-open="edit-expense-{{ expense.id }}">{{ ui.icon('edit') }}Edit</button></td></tr>
+    {% else %}<tr class="table-empty"><td colspan="7">No exceptional expenses recorded.</td></tr>{% endfor %}</tbody>
   </table></div>
+  {% if request.query_params.get('edited') %}<div class="notice ok toast" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ 'Costs saved' if request.query_params.get('edited') != '0' else 'Nothing changed' }}.</strong><p>Customer charges recalculate from the new costs; every change is in the audit history.</p></div></div>{% endif %}
+  {% set back = '/logistics?season=' ~ ((season.name if season else '')|urlencode) ~ '&focus=shipments' %}
+  {% for row in summaries %}{% set s = row.shipment %}
+  {% call ui.drawer('edit-shipment-' ~ s.id, 'Edit ' ~ s.name, 'Changes are saved with the audit history. Transport and fees recalculate for every customer in the shipment.') %}
+  <form action="/shipments/{{ s.id }}/costs" method="post" class="form-grid" data-once data-guard>
+    <input type="hidden" name="next" value="{{ back }}">
+    <label>Date<input type="date" name="shipment_date" value="{{ s.date or '' }}"></label>
+    <label>Status<input name="status" value="{{ s.status }}" maxlength="50"></label>
+    <label>Fixed cost<input name="fixed_cost" type="number" step="0.01" min="0" value="{{ s.fixed_cost|plain }}"></label>
+    <label>Suitcase cost<input name="suitcase_cost" type="number" step="0.01" min="0" value="{{ s.suitcase_cost|plain }}"></label>
+    <label>Bag cost<input name="bag_cost" type="number" step="0.01" min="0" value="{{ s.bag_cost|plain }}"></label>
+    <fieldset class="wide"><legend>Transport</legend>
+      <label class="check-line"><input type="radio" name="use_rule_transport" value="on" {{ 'checked' if s.use_rule_transport }}> Use the Brand + Season rule</label>
+      <label class="check-line"><input type="radio" name="use_rule_transport" value="off" {{ 'checked' if not s.use_rule_transport }}> Use this shipment's percentage</label>
+      <label>Transport %<input name="transport_percentage" type="number" step="0.01" min="0" max="100" value="{{ (s.transport_percentage * 100)|plain }}"></label>
+    </fieldset>
+    <label class="wide">Notes<textarea name="notes" rows="2">{{ s.notes or '' }}</textarea></label>
+    <div class="form-actions"><button class="btn primary">Save costs</button></div>
+  </form>
+  {% endcall %}{% endfor %}
+  {% for expense in expenses %}
+  {% call ui.drawer('edit-expense-' ~ expense.id, 'Edit expense', 'The amount is shared again by shipment, order or customer as before.') %}
+  <form action="/expenses/{{ expense.id }}" method="post" class="form-grid" data-once data-guard>
+    <input type="hidden" name="next" value="{{ back }}">
+    <label>Type<select name="expense_type">{% for t in ['exceptional', 'transport', 'bag', 'suitcase', 'fixed logistics'] %}<option {{ 'selected' if t == expense.type }}>{{ t }}</option>{% endfor %}</select></label>
+    <label>Amount<input name="amount" type="number" step="0.01" min="0" value="{{ expense.amount|plain }}" required></label>
+    <label class="wide">Note<textarea name="note" rows="2">{{ expense.note or '' }}</textarea></label>
+    <div class="form-actions"><button class="btn primary">Save expense</button></div>
+  </form>
+  {% endcall %}{% endfor %}
 </section>
 
 <section class="section" id="groups" aria-labelledby="groups-title">

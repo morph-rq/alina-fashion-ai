@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Upload check · {{ check.batch.filename }}{% endblock %}
+{% block content %}
+{{ ui.workspace_bar() }}
+{% set c = check.counts %}
+<header class="page-header"><div><h1>Upload check</h1><p class="page-sub">{{ check.batch.filename }} · imported {{ check.batch.imported_at.strftime('%Y-%m-%d %H:%M') if check.batch.imported_at else '' }}. Every problem found in this file, with a fix link for each. Nothing is changed until you save it.</p></div>
+  <div class="page-actions"><a class="btn" href="/imports/{{ check.batch.id }}/check.xlsx?show={{ check.show }}">{{ ui.icon('download') }}Export check to Excel</a><form action="/imports/{{ check.batch.id }}/check/drive" method="post" data-once><input type="hidden" name="show" value="{{ check.show }}"><button class="btn quiet">{{ ui.icon('upload') }}Save check to Drive</button></form><a class="btn quiet" href="/import">Upload another file</a></div></header>
+{% if request.query_params.get('drive') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Queued for Google Drive.</strong><p>It uploads in the background and counts as saved only when Drive's checksum matches. Progress is in Settings › Connections.</p></div></div>{% endif %}
+{% if request.query_params.get('drive_error') %}<div class="notice warn" role="status"><span class="notice-icon" aria-hidden="true">!</span><div><strong>Not sent to Drive.</strong><p>{{ request.query_params.get('drive_error') }} <a href="/connections">Open connections</a></p></div></div>{% endif %}
+
+{% if request.query_params.get('uploaded') %}
+  {% if request.query_params.get('already') %}<div class="notice info" role="status"><span class="notice-icon" aria-hidden="true">i</span><div><strong>This exact file was imported before.</strong><p>Nothing was imported twice. The check below is for the earlier import of the same file.</p></div></div>
+  {% elif c.error %}<div class="notice warn" role="status"><span class="notice-icon" aria-hidden="true">!</span><div><strong>Imported, with {{ c.error }} problem{{ '' if c.error == 1 else 's' }} to fix{% if c.warning %} and {{ c.warning }} to check{% endif %}.</strong><p>Red rows need a decision before customer accounting is correct. Fix them below, then mark products Done.</p></div></div>
+  {% else %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Imported with no blocking problems.</strong><p>{% if c.warning %}{{ c.warning }} item{{ '' if c.warning == 1 else 's' }} are worth a quick check.{% else %}All rows passed the product checks.{% endif %}</p></div></div>{% endif %}
+{% endif %}
+{% if request.query_params.get('updated') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Updated {{ request.query_params.get('updated') }} product{{ '' if request.query_params.get('updated') == '1' else 's' }}.</strong></div></div>{% endif %}
+{% if request.query_params.get('saved') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Product #{{ request.query_params.get('saved') }} saved.</strong></div></div>{% endif %}
+
+<div class="check-summary" role="list">
+  <a role="listitem" class="check-tile tone-danger" href="#problems"><strong>{{ c.error }}</strong><span>Need fixing</span></a>
+  <a role="listitem" class="check-tile tone-warn" href="#problems"><strong>{{ c.warning }}</strong><span>To check</span></a>
+  <a role="listitem" class="check-tile tone-ok" href="#problems"><strong>{{ c.resolved }}</strong><span>Resolved notes</span></a>
+  <a role="listitem" class="check-tile" href="#products"><strong>{{ check.states.values()|sum }}</strong><span>Products from this file</span></a>
+</div>
+
+<section class="section" id="problems" aria-labelledby="problems-title">
+  <div class="section-head"><div><h2 id="problems-title">Problems <span class="count{{ ' danger' if c.error }}">{{ check.problems|length }}</span></h2><p>Customer splits, source notes and protected changes first, then product facts. Saving a product returns you here.</p></div></div>
+  {% if check.problems %}
+  <div class="wb-table-scroll" tabindex="0" aria-label="Problems in this upload"><table class="wb-table check-table">
+    <thead><tr><th>Colour</th><th>Type</th><th>Where</th><th>Problem</th><th><span class="sr-only">Fix</span></th></tr></thead>
+    <tbody>{% for p in check.problems %}<tr class="tone-row {{ p.tone }}">
+      <td><span class="status-pill {{ {'error': 'pending', 'warning': 'process', 'resolved': 'done'}[p.tone] }}">{{ tone_labels[p.tone] }}</span></td>
+      <td>{{ p.kind }}</td>
+      <td>{{ p.where }}{% if p.item %}<small>{{ p.item.name or p.item.article or ('#' ~ p.item.id) }} · {{ p.item.customer.code if p.item.customer else 'no customer' }}</small>{% endif %}</td>
+      <td class="wrap">{{ p.message }}</td>
+      <td>{% if p.tone != 'resolved' %}<a class="btn sm" href="{{ p.fix_url }}">{{ p.fix_label }}</a>{% else %}<a class="btn sm quiet" href="{{ p.fix_url }}">View</a>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}{% call ui.empty('No problems in this upload', 'Every row has a customer, a price, a size and matches the source totals.') %}{% endcall %}{% endif %}
+</section>
+
+<section class="section" id="products" aria-labelledby="products-title">
+  <div class="section-head"><div><h2 id="products-title">Products from this file</h2><p>Select rows and mark them in one step. Red = not done, yellow = in process, green = done.</p></div>
+    <div class="legend">{% for key, label in status_labels.items() %}{{ ui.swatch(key, label ~ ' ' ~ check.states[key]) }}{% endfor %}</div></div>
+  <nav class="chips" aria-label="Show products">
+    {% for key, label in [('all', 'All'), ('problems', 'With problems'), ('pending', status_labels.pending), ('process', status_labels.process), ('done', status_labels.done)] %}
+    <a class="chip" href="?show={{ key }}#products" {% if check.show == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+  </nav>
+  {% if check.rows %}
+  <form action="/worksheet/bulk" method="post" id="bulk-form">
+    <input type="hidden" name="next" value="{{ check.here }}?show={{ check.show }}">
+    <div class="ws-meta"><span><strong>{{ check.rows|length }}</strong> products · {{ check.total_value|money }} {{ currency }}</span><label class="select-all"><input type="checkbox" id="select-all"> Select shown</label></div>
+    <div class="bulk-bar" id="bulk-bar" role="region" aria-label="Mark selected products">
+      <strong id="selection-count">0 selected</strong>
+      <label><span class="sr-only">Status for selected products</span><select name="state" required><option value="">Mark as…</option>{% for key, label in status_labels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+      <button class="btn" type="submit" id="apply-selection" disabled>Apply to selection</button>
+      <button class="btn quiet" type="button" id="clear-selection" style="color:#fff">Clear</button>
+    </div>
+    <div class="wb-table-scroll" tabindex="0" aria-label="Products from this file"><table class="wb-table">
+      <thead><tr><th class="check-col"><span class="sr-only">Select</span></th><th>Status</th><th>Product</th><th>Customer</th><th>Brand</th><th>Colour / size</th><th class="number">Qty</th><th class="number">Wholesale</th><th class="number">Markup</th><th class="number">Value {{ currency }}</th><th>Problems</th><th><span class="sr-only">Open</span></th></tr></thead>
+      <tbody>{% for row in check.rows %}{% set i = row.item %}<tr class="product-row state-row {{ row.state }}">
+        <td class="check"><input type="checkbox" name="item_ids" value="{{ i.id }}" aria-label="Select {{ i.name or i.article or ('product ' ~ i.id) }}"></td>
+        <td><span class="status-pill {{ row.state }}">{{ status_labels[row.state] }}</span></td>
+        <td><a class="title" href="{{ row.url }}">{{ i.name or i.article or 'Description missing' }}</a><small>{{ i.article or 'No article' }} · {{ i.source_sheet or '' }}{% if i.source_row %} row {{ i.source_row }}{% endif %}</small></td>
+        <td>{% if i.customer %}<span class="customer-chip">{{ i.customer.code }}</span>{% else %}<a class="flag" href="{{ row.url }}">Needs a customer</a><small>{{ i.source_allocation_description or '' }}</small>{% endif %}</td>
+        <td>{{ i.order.brand.name }}<small>{{ i.order.season.name }}</small></td>
+        <td>{{ i.color or '—' }}<small>{{ 'Size ' ~ i.size if i.size else 'No size' }}</small></td>
+        <td class="number">{{ i.quantity }}</td>
+        <td class="number">{{ i.wholesale_unit_price|money }}</td>
+        <td class="number">{{ i.markup_percentage|percent }}</td>
+        <td class="number">{{ row.value|money }}</td>
+        <td class="wrap">{% for issue in row.issues %}<span class="badge {{ 'tone-danger' if issue.severity == 'error' else 'tone-warn' }}">{{ issue.message }}</span>{% else %}<span class="muted">—</span>{% endfor %}</td>
+        <td><a class="row-edit" href="{{ row.url }}" aria-label="Edit product {{ i.id }}">{{ ui.icon('edit') }}</a></td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+  </form>
+  {% else %}<div class="ws-empty">No products {% if check.show != 'all' %}match this filter{% else %}were recorded from this file{% endif %}.</div>{% endif %}
+</section>
+
+{% if batches|length > 1 %}<section class="section"><div class="section-head"><div><h2>Other uploads</h2></div></div><nav class="chips" aria-label="Uploads">{% for b in batches %}<a class="chip" href="/imports/{{ b.id }}/check" {% if b.id == check.batch.id %}aria-current="page"{% endif %}>{{ b.filename }}</a>{% endfor %}</nav></section>{% endif %}
+{% endblock %}

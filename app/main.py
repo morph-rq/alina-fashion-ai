@@ -5,6 +5,7 @@ import asyncio
 import secrets
 import json
 import hashlib
+import logging
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -1753,13 +1754,25 @@ def upload_workbook(file: UploadFile = File(...), db: Session = Depends(get_db))
     destination = import_dir / safe_name
     with destination.open("wb") as stream:
         shutil.copyfileobj(file.file, stream)
+    digest = hashlib.sha256(destination.read_bytes()).hexdigest()
     try:
         summary = import_workbook(db, destination)
         db.commit()
-    except Exception:
+    except Exception as exc:
+        # Show why the file could not be read instead of a server error; nothing is half-imported.
         db.rollback()
-        raise
-    return RedirectResponse(f"/import?result={summary.get('items', 0)}", status_code=303)
+        logging.getLogger(__name__).exception("Master workbook import failed: %s", safe_name)
+        shutil.rmtree(import_dir, ignore_errors=True)
+        from urllib.parse import quote
+        reason = f"{type(exc).__name__}: {exc}"[:300]
+        return RedirectResponse(f"/import?error={quote(reason)}&file={quote(safe_name)}", status_code=303)
+    batch = db.scalar(select(ImportBatch).where(ImportBatch.sha256 == digest))
+    if batch is None:
+        return RedirectResponse(f"/import?result={summary.get('items', 0)}", status_code=303)
+    if summary.get("already_imported"):
+        shutil.rmtree(import_dir, ignore_errors=True)
+    already = "&already=1" if summary.get("already_imported") else ""
+    return RedirectResponse(f"/imports/{batch.id}/check?uploaded=1{already}", status_code=303)
 
 
 @app.post("/imports/{batch_id}/source/delete")
@@ -2304,5 +2317,7 @@ from app.recovery_routes import install_recovery
 install_recovery(app, templates, context)
 from app.ui_routes import install_ui
 install_ui(app, templates, context)
+from app.upload_check import install_upload_check
+install_upload_check(app, templates, context)
 # Register background job handlers and schedulers.
 from app import outbox as _outbox, sync as _sync  # noqa: E402,F401

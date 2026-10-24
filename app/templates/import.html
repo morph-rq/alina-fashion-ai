@@ -6,6 +6,7 @@
 <header class="page-header"><div><h1>Import the original master workbook</h1><p class="page-sub">For the SS26 source layout. Start from an empty base or upload a later supplier version: unchanged rows are skipped, safe changes are applied and changes to Ready or shipped goods are held for review.</p></div></header>
 <div class="notice info"><span class="notice-icon" aria-hidden="true">i</span><div><strong>Editing a file downloaded from this app?</strong><p>Use Edit in Excel instead: it previews every change before saving.</p></div><a class="btn" href="/excel">Edit in Excel</a></div>
 {% if request.query_params.get('result') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Import finished: {{ request.query_params.get('result') }} product rows processed.</strong><p>Review anything listed under Import review and Allocation review below.</p></div></div>{% endif %}
+{% if request.query_params.get('error') %}<div class="notice danger" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ request.query_params.get('file') or 'The file' }} could not be imported.</strong><p>Nothing was saved. Reason: {{ request.query_params.get('error') }}</p><p>This page reads the original SS26 master layout. For a workbook downloaded from this app use Edit in Excel; for any other order file use Inbox, which reads PDFs, photos, text and other spreadsheets.</p></div></div>{% endif %}
 {% if request.query_params.get('source_deleted') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Stored source file deleted.</strong><p>Imported products, payments, reviews and history remain.</p></div></div>{% endif %}
 
 <div class="grid-2">
@@ -17,7 +18,7 @@
     {% for batch in batches %}<div class="batch"><div class="batch-head"><div><strong>{{ batch.filename }}</strong><small class="muted" style="display:block">{{ batch.imported_at }}</small></div>
       {% if batch.source_deleted_at %}<span class="badge">Source file deleted</span>
       {% elif batch.stored_path %}<div class="btn-row"><a class="btn sm quiet" href="/imports/{{ batch.id }}/download">Download</a><form action="/imports/{{ batch.id }}/source/delete" method="post" data-confirm="Delete the stored Excel file? Imported products and accounting records will remain."><input type="hidden" name="confirmation" value="DELETE_SOURCE_FILE"><button class="btn sm danger" type="submit">{{ ui.icon('trash') }}Delete stored file</button></form></div>
-      {% else %}<span class="muted">External source, no project copy</span>{% endif %}</div><details class="batch-raw"><summary>Import details</summary><code>{{ batch.summary_json }}</code></details></div>
+      {% else %}<span class="muted">External source, no project copy</span>{% endif %}</div><a class="btn sm" href="/imports/{{ batch.id }}/check">Check this upload</a> <details class="batch-raw"><summary>Import details</summary><code>{{ batch.summary_json }}</code></details></div>
     {% else %}<p class="muted">No imports yet.</p>{% endfor %}
     <p class="muted" style="font-size:12.5px">Deleting a stored file removes only the project copy. Imported products, payments, calculations, reviews and audit history remain.</p>
   </section>

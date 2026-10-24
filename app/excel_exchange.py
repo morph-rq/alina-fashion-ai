@@ -33,7 +33,7 @@ HEADERS = ['ID', 'Season', 'Brand', 'Customer code', 'Customer name', 'Article /
 EDITABLE = HEADERS[:16]
 # Edits that change posted liabilities of a Ready/shipped row.
 OPERATIONAL_COLUMNS = {'Customer code', 'Quantity', 'Wholesale unit EUR', 'Markup %', 'Selling unit override EUR'}
-COLORS = {'In process': 'FFF2B3', 'Done': 'D9EEDB', 'Not completed': 'FFFFFF'}
+COLORS = {'In process': 'FFF2B3', 'Done': 'D9EEDB', 'Not completed': 'F8D7D3'}
 
 
 def clean(value):

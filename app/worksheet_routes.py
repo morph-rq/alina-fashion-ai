@@ -36,7 +36,7 @@ def amount_value(value, label='Amount', positive=False):
 
 def with_notice(target, **params):
     """Add a one-time confirmation (e.g. saved=12) to a worksheet return URL."""
-    if not target.startswith('/worksheet'):
+    if not target.startswith(('/worksheet', '/imports/')):
         return target
     from urllib.parse import urlencode
     return target + ('&' if '?' in target else '?') + urlencode(params)
@@ -132,7 +132,7 @@ def install_worksheet(app, templates, context):
     def item_page(item_id: int, request: Request, db=Depends(get_db)):
         item = find(db, OrderItem, item_id)
         back = safe_next(request.query_params.get('next'), '/worksheet')
-        if not back.startswith('/worksheet'):
+        if not back.startswith(('/worksheet', '/imports/')):
             back = '/worksheet'
         history = db.scalars(select(AuditLog).where(AuditLog.entity_type == 'OrderItem', AuditLog.entity_id == str(item.id))
                              .order_by(AuditLog.timestamp.desc()).limit(8)).all()

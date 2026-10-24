@@ -41,7 +41,7 @@
 </section>
 
 <section class="section" id="products" aria-labelledby="products-title">
-  <div class="section-head"><div><h2 id="products-title">Products from this file</h2><p>Select rows and mark them in one step. Red = not done, yellow = in process, green = done.</p></div>
+  <div class="section-head"><div><h2 id="products-title">Products from this file</h2><p>Click a cell to correct it (Enter saves), or select rows and mark them in one step. Red = not done, yellow = in process, green = done.</p></div>
     <div class="legend">{% for key, label in status_labels.items() %}{{ ui.swatch(key, label ~ ' ' ~ check.states[key]) }}{% endfor %}</div></div>
   <nav class="chips" aria-label="Show products">
     {% for key, label in [('all', 'All'), ('problems', 'With problems'), ('pending', status_labels.pending), ('process', status_labels.process), ('done', status_labels.done)] %}
@@ -59,16 +59,16 @@
     </div>
     <div class="wb-table-scroll" tabindex="0" aria-label="Products from this file"><table class="wb-table">
       <thead><tr><th class="check-col"><span class="sr-only">Select</span></th><th>Status</th><th>Product</th><th>Customer</th><th>Brand</th><th>Colour / size</th><th class="number">Qty</th><th class="number">Wholesale</th><th class="number">Markup</th><th class="number">Value {{ currency }}</th><th>Problems</th><th><span class="sr-only">Open</span></th></tr></thead>
-      <tbody>{% for row in check.rows %}{% set i = row.item %}<tr class="product-row state-row {{ row.state }}">
+      <tbody>{% for row in check.rows %}{% set i = row.item %}<tr class="product-row state-row {{ row.state }}" data-edit-url="/worksheet/items/{{ i.id }}/cell" data-revision="{{ i.revision }}">
         <td class="check"><input type="checkbox" name="item_ids" value="{{ i.id }}" aria-label="Select {{ i.name or i.article or ('product ' ~ i.id) }}"></td>
         <td><span class="status-pill {{ row.state }}">{{ status_labels[row.state] }}</span></td>
         <td><a class="title" href="{{ row.url }}">{{ i.name or i.article or 'Description missing' }}</a><small>{{ i.article or 'No article' }} · {{ i.source_sheet or '' }}{% if i.source_row %} row {{ i.source_row }}{% endif %}</small></td>
-        <td>{% if i.customer %}<span class="customer-chip">{{ i.customer.code }}</span>{% else %}<a class="flag" href="{{ row.url }}">Needs a customer</a><small>{{ i.source_allocation_description or '' }}</small>{% endif %}</td>
+        <td><span class="cell{{ ' cell-missing' if not i.customer }}" data-edit-key="customer" data-value="{{ i.customer.code if i.customer else '' }}" tabindex="0" aria-label="Customer code">{{ i.customer.code if i.customer else 'type code' }}</span>{% if not i.customer %}<small>{{ i.source_allocation_description or '' }}</small>{% endif %}</td>
         <td>{{ i.order.brand.name }}<small>{{ i.order.season.name }}</small></td>
-        <td>{{ i.color or '—' }}<small>{{ 'Size ' ~ i.size if i.size else 'No size' }}</small></td>
-        <td class="number">{{ i.quantity }}</td>
-        <td class="number">{{ i.wholesale_unit_price|money }}</td>
-        <td class="number">{{ i.markup_percentage|percent }}</td>
+        <td><span class="cell" data-edit-key="color" data-value="{{ i.color or '' }}" tabindex="0" aria-label="Colour">{{ i.color or '—' }}</span><small>Size <span class="cell{{ ' cell-missing' if not i.size }}" data-edit-key="size" data-value="{{ i.size or '' }}" tabindex="0" aria-label="Size">{{ i.size or 'add' }}</span></small></td>
+        <td class="number"><span class="cell" data-edit-key="quantity" data-type="number" data-value="{{ i.quantity }}" tabindex="0" aria-label="Quantity">{{ i.quantity }}</span></td>
+        <td class="number"><span class="cell{{ ' cell-missing' if i.wholesale_unit_price is none }}" data-edit-key="wholesale" data-type="money" data-value="{{ i.wholesale_unit_price|plain if i.wholesale_unit_price is not none else '' }}" tabindex="0" aria-label="Wholesale price">{{ i.wholesale_unit_price|money if i.wholesale_unit_price is not none else 'add' }}</span></td>
+        <td class="number"><span class="cell" data-edit-key="markup" data-type="number" data-value="{{ (i.markup_percentage * 100)|plain }}" tabindex="0" aria-label="Markup percent">{{ i.markup_percentage|percent }}</span></td>
         <td class="number">{{ row.value|money }}</td>
         <td class="wrap">{% for issue in row.issues %}<span class="badge {{ 'tone-danger' if issue.severity == 'error' else 'tone-warn' }}">{{ issue.message }}</span>{% else %}<span class="muted">—</span>{% endfor %}</td>
         <td><a class="row-edit" href="{{ row.url }}" aria-label="Edit product {{ i.id }}">{{ ui.icon('edit') }}</a></td>

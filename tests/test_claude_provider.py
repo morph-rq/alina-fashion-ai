@@ -32,7 +32,8 @@ def claude(monkeypatch):
 
 def test_key_prefix_selects_claude_defaults(claude):
     assert settings.active_ai_provider == "anthropic"
-    assert settings.active_ai_model == "claude-opus-5-5"
+    assert settings.active_ai_model == "claude-sonnet-5-5"
+    assert settings.active_ai_fallback_models == "claude-haiku-5-5"
 
 
 def test_structured_call_sends_claude_request(claude, monkeypatch):
@@ -46,7 +47,7 @@ def test_structured_call_sends_claude_request(claude, monkeypatch):
     assert result.reason == "none"
     assert seen["url"].startswith("https://api.anthropic.com/")
     assert seen["headers"]["x-api-key"] == "sk-ant-test"
-    assert seen["body"]["model"] == "claude-opus-5-5"
+    assert seen["body"]["model"] == "claude-sonnet-5-5"
     assert seen["body"]["messages"][0]["content"][1]["type"] == "image"
     assert seen["body"]["output_config"]["format"]["schema"]["additionalProperties"] is False
 
@@ -64,7 +65,7 @@ def test_400_retries_without_schema_then_falls_back_on_5xx(claude, monkeypatch):
     monkeypatch.setattr(ai_intake.httpx, "post", post)
     result = ai_intake._generate(ai_intake.ImageApproval, "sys", [{"text": "hi"}])
     assert result.recommended_index == 1
-    assert modes == [("claude-opus-5-5", True), ("claude-opus-5-5", False), ("claude-sonnet-5-5", True)]
+    assert modes == [("claude-sonnet-5-5", True), ("claude-sonnet-5-5", False), ("claude-haiku-5-5", True)]
 
 
 def test_auth_failure_and_audio_are_clear(claude, monkeypatch):

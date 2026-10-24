@@ -2,7 +2,44 @@
 
 A clean FastAPI/SQLite workspace for fashion orders, customer records, collections, payments, shipping, product images, Excel exports, and customer PDFs.
 
-## Start here (testing copy, 2026-10-20)
+## Download and set up (Windows, about 10 minutes)
+
+1. **Install once:** [Git](https://git-scm.com/download/win) and [Python 3.12](https://www.python.org/downloads/)
+   (tick *Add python.exe to PATH*). Optional but faster: [uv](https://docs.astral.sh/uv/).
+2. **Download** (the repository is private, so sign in to GitHub first; the
+   [GitHub CLI](https://cli.github.com/) `gh auth login` is the easiest way):
+
+   ```powershell
+   cd $HOME\Documents
+   gh repo clone morph-rq/alina-fashion-local
+   cd alina-fashion-local
+   ```
+
+   Without the CLI: `git clone https://github.com/morph-rq/alina-fashion-local.git` (Git asks you to sign in), or
+   on github.com press **Code › Download ZIP** and unzip it.
+3. **Set up:** `powershell -ExecutionPolicy Bypass -File .\setup.ps1` (creates `.venv`, installs the packages and
+   a starter `.env`).
+4. **Start:** `.\scripts\run.ps1`, then open <http://127.0.0.1:8001>. Stop it with Ctrl+C.
+5. **Connect Claude (optional, recommended):** create an API key at
+   [console.anthropic.com](https://console.anthropic.com/) › *API keys* (add billing credit there), then in the app
+   open **Settings › AI assistant**, paste the key, choose **Claude Sonnet 5.5** (best quality) or **Claude
+   Haiku 5.5** (fastest, cheapest) and press **Test and save**. The key is stored encrypted on this computer and is
+   never shown again or put in backups. If one model is busy the other is used automatically. Alternatively put
+   `FASHION_AI_API_KEY=sk-ant-…` (and optionally `FASHION_AI_MODEL=claude-haiku-5-5`) in `.env`.
+6. **Optional:** Google Drive and Gmail — [docs/drive-gmail-setup.md](docs/drive-gmail-setup.md); backups —
+   [docs/backup-restore.md](docs/backup-restore.md).
+
+To update later: `git pull`, then run `setup.ps1` again if `requirements.txt` changed. Your data stays in `data/`
+(never uploaded to GitHub). GitHub stores the code only; it cannot run this app. To use it from a phone or another
+computer, host it as described in [DEPLOYMENT.md](DEPLOYMENT.md) and set a login password first.
+
+## Start here (testing copy, updated 2026-10-24)
+
+- **Tables** (Workspace › Tables): describe a table in words — "New season FW27 with brands A and B, 30% markup"
+  or "a table of suppliers with name, phone, email" — check the draft, create it, then type straight into the
+  cells like Excel and download it as `.xlsx`.
+- After uploading a master workbook the **Upload check** opens: every problem, colour-coded (red / yellow /
+  green), editable in the cells, exportable to Excel.
 
 - Four areas: **Overview**, **Workspace**, **Inbox**, **Customers**; Search, AI Help, Add and Settings sit in the
   top bar. Where every former tab went: [docs/navigation-guide.md](docs/navigation-guide.md).

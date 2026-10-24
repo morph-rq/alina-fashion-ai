@@ -9,6 +9,7 @@
     <h2 id="business-title">Business</h2>
     <div class="settings-list">
       <a class="setting-link" href="/rules">{{ ui.icon('rules') }}<strong>Brand + Season rules</strong><p>Markup, initial and Ready percentages, transport and exemptions, special costs and receipt days.</p><span class="badge">{{ rule_count }} rule{{ '' if rule_count == 1 else 's' }}</span></a>
+      <a class="setting-link" href="/settings/ai">{{ ui.icon('check') }}<strong>AI assistant (Claude)</strong><p>Paste a Claude API key and choose Sonnet 5.5 or Haiku 5.5 for reading orders, drafting tables and AI Help.</p>{% if ai_status.source %}<span class="badge tone-ok">{{ ai_status.model }}</span>{% else %}<span class="badge">Not connected</span>{% endif %}</a>
       <a class="setting-link" href="/library">{{ ui.icon('link') }}<strong>Library and references</strong><p>Brands, season catalogues, product links, saved collections and stored documents.</p><span class="badge">{{ brand_count }} brand{{ '' if brand_count == 1 else 's' }}</span></a>
     </div>
   </section>

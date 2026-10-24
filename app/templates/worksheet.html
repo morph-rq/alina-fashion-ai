@@ -72,7 +72,7 @@
         {% for label, records in buckets.items() %}
           <tr class="wb-group-row"><th colspan="12">{{ label }}<span>{{ records|length }} record{{ '' if records|length == 1 else 's' }} · {{ records|sum(attribute='value')|money }} {{ currency }}</span></th></tr>
           {% for row in records %}{% set i = row.item %}{% set item_url = '/worksheet/items/' ~ i.id ~ '?next=' ~ (here|urlencode) %}
-          <tr class="product-row" data-item-id="{{ i.id }}">
+          <tr class="product-row" data-item-id="{{ i.id }}" data-edit-url="/worksheet/items/{{ i.id }}/cell" data-revision="{{ i.revision }}">
             <td class="check"><input type="checkbox" name="item_ids" value="{{ i.id }}" aria-label="Select {{ i.name or i.article or ('product ' ~ i.id) }}"></td>
             <td><div class="product-cell">
               <div><a class="title" href="{{ item_url }}">{{ i.name or i.article or 'Description missing' }}</a><small>{{ i.article or 'No article' }} · #{{ i.id }}</small>
@@ -81,8 +81,8 @@
             </div></td>
             <td>{% if i.customer %}<a class="customer-chip" href="/customers/{{ i.customer.id }}?season={{ i.order.season.name|urlencode }}">{{ i.customer.code }}</a><small>{{ i.customer.name or 'Name not supplied' }}{% if i.customer.country_code %} · {{ i.customer.country_code }}{% endif %}</small>{% else %}<a class="flag" href="{{ item_url }}">Needs allocation</a><small>{{ i.source_allocation_description or 'No confirmed customer' }}</small>{% endif %}</td>
             <td>{{ i.order.brand.name }}<small>{{ i.order.season.name }}</small></td>
-            <td>{{ i.color or '—' }}<small>{% if i.size %}Size {{ i.size }}{% else %}<a class="flag" href="{{ item_url }}">Confirm size</a>{% endif %}</small></td>
-            <td class="number">{{ i.quantity }}</td>
+            <td><span class="cell" data-edit-key="color" data-value="{{ i.color or '' }}" tabindex="0" aria-label="Colour of {{ i.name or i.article }}">{{ i.color or '—' }}</span><small>Size <span class="cell{{ ' cell-missing' if not i.size }}" data-edit-key="size" data-value="{{ i.size or '' }}" tabindex="0" aria-label="Size of {{ i.name or i.article }}">{{ i.size or 'add' }}</span></small></td>
+            <td class="number"><span class="cell" data-edit-key="quantity" data-value="{{ i.quantity }}" data-type="number" tabindex="0" aria-label="Quantity of {{ i.name or i.article }}">{{ i.quantity }}</span></td>
             <td class="number">{% if i.wholesale_unit_price is not none %}{{ row.value|money }}{% else %}<a class="flag" href="{{ item_url }}">Add price</a>{% endif %}</td>
             <td class="number opt">{{ row.special|money }}</td>
             <td class="number opt">{% if row.credit_recorded %}{{ row.credit|money }}{% else %}<span class="muted">Not allocated</span>{% endif %}</td>

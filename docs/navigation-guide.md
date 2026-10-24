@@ -27,6 +27,13 @@ select products and **Mark as** a colour, and **Export check to Excel** or **Sav
 later through **Excel & statements › Check the last upload**. Shipment and expense amounts can be corrected in
 **Ready & shipping** with **Edit costs**.
 
+## Tables and typing into cells
+
+**Workspace › Tables**: write what you need ("New season FW27 with brands Atelier Nord and Lumen, 30% markup" or
+"a table of samples with brand, item, qty, deadline"), press **Draft the table**, check it, press **Create**. In any
+grid, click a cell (or select it and start typing), press **Enter** to save and go down, **Tab** to go right, **Esc**
+to cancel. Claude is connected in **Settings › AI assistant**.
+
 ## Where the former tabs are now
 
 | Former tab or menu item | Now | Old link |

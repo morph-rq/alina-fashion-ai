@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}{{ table.name }}{% endblock %}
+{% block content %}
+{{ ui.workspace_bar() }}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/tables">Tables</a><span aria-hidden="true">/</span><span>{{ table.name }}</span></nav>
+<header class="page-header"><div><h1>{{ table.name }}</h1><p class="page-sub">Click a cell to type; Enter or Tab saves, Esc cancels.</p></div>
+  <div class="page-actions"><a class="btn" href="/tables/{{ table.id }}/export.xlsx">{{ ui.icon('download') }}Download Excel</a>
+    <details class="menu"><summary class="btn quiet">More<span class="chev">{{ ui.icon('chev') }}</span></summary><div class="menu-panel" role="menu">
+      <button class="menu-item" type="button" role="menuitem" data-open="add-column">{{ ui.icon('columns') }}<span>Add a column</span></button>
+      <button class="menu-item" type="button" role="menuitem" data-open="delete-table">{{ ui.icon('trash') }}<span>Delete this table</span></button>
+    </div></details></div></header>
+{% if request.query_params.get('added') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Added {{ request.query_params.get('added') }} row{{ '' if request.query_params.get('added') == '1' else 's' }}.</strong>{% if request.query_params.get('note') %}<p>{{ request.query_params.get('note') }}</p>{% endif %}</div></div>{% endif %}
+
+<div class="sheet-scroll" tabindex="0" aria-label="{{ table.name }}">
+<table class="sheet-grid editable" data-sheet>
+  <thead>
+    <tr class="letters"><th class="rownum"></th>{% for c in columns %}<th>{{ column_letter(loop.index0) }}</th>{% endfor %}<th class="row-tools"></th></tr>
+    <tr><th class="rownum"></th>{% for c in columns %}<th class="col-{{ c.type }}">{{ c.name }}</th>{% endfor %}<th class="row-tools"><span class="sr-only">Row actions</span></th></tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}{% set v = values_of(row) %}
+    <tr data-edit-url="/tables/{{ table.id }}/cell" data-row-id="{{ row.id }}" data-revision="{{ row.revision }}">
+      <td class="rownum">{{ loop.index }}</td>
+      {% for c in columns %}<td class="cell col-{{ c.type }}" data-edit-key="{{ c.key }}" data-type="{{ c.type }}" tabindex="0" aria-label="{{ c.name }} row {{ loop.index }}">{{ v.get(c.key, '') }}</td>{% endfor %}
+      <td class="row-tools"><form action="/tables/{{ table.id }}/rows/{{ row.id }}/delete" method="post" data-confirm="Delete row {{ loop.index }}? Its values stay in the audit history."><button class="icon-btn" aria-label="Delete row {{ loop.index }}">×</button></form></td>
+    </tr>
+  {% else %}<tr class="table-empty"><td colspan="{{ columns|length + 2 }}">No rows yet. Add a row or describe rows below.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<div id="bottom" class="grid-foot">
+  <form action="/tables/{{ table.id }}/rows" method="post" class="inline-form" data-once><input type="hidden" name="count" value="1"><button class="btn">+ Add row</button></form>
+  <form action="/tables/{{ table.id }}/rows" method="post" class="inline-form" data-once><input type="hidden" name="count" value="10"><button class="btn quiet">+ 10 rows</button></form>
+</div>
+
+<section class="panel describe-panel" aria-labelledby="rows-title">
+  <h2 id="rows-title">Add rows by describing or pasting them</h2>
+  <form action="/tables/{{ table.id }}/rows/describe" method="post" class="describe-form" data-once>
+    <label for="rows-text" class="sr-only">Rows</label>
+    <textarea id="rows-text" name="text" rows="3" required maxlength="6000" placeholder="Paste from Excel (one row per line), or write: Fornitore Uno, phone +39 02 1234, orders over 500 EUR, visit 2026-11-12"></textarea>
+    <div class="describe-actions"><button class="btn primary">Add rows</button><span class="muted">Columns in order: {{ columns|map(attribute='name')|join(', ') }}.</span></div>
+  </form>
+</section>
+
+{% call ui.drawer('add-column', 'Add a column') %}
+<form action="/tables/{{ table.id }}/columns" method="post" class="form-grid" data-once>
+  <label>Name<input name="name" required maxlength="60"></label>
+  <label>Type<select name="column_type">{% for t in column_types %}<option>{{ t }}</option>{% endfor %}</select></label>
+  <div class="form-actions"><button class="btn primary">Add column</button></div>
+</form>
+{% endcall %}
+{% call ui.drawer('delete-table', 'Delete ' ~ table.name, 'The table and its rows are removed; the audit history keeps a record.') %}
+<form action="/tables/{{ table.id }}/delete" method="post" class="form-grid">
+  <label class="wide">Type <strong>{{ table.name }}</strong> to confirm<input name="confirmation" required autocomplete="off"></label>
+  <div class="form-actions"><button class="btn danger">Delete table</button></div>
+</form>
+{% endcall %}
+{% endblock %}

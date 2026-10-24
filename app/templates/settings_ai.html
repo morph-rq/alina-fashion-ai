@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}AI settings{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/settings">Settings</a><span aria-hidden="true">/</span><span>AI</span></nav>
+<header class="page-header"><div><h1>AI assistant</h1><p class="page-sub">Claude reads order messages, photos, PDFs and spreadsheets, drafts tables and answers AI Help. Everything it drafts is shown to you before it is saved.</p></div></header>
+{% if message %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>{{ message }}</strong></div></div>{% endif %}
+{% if error %}<div class="notice danger" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
+
+<section class="panel">
+  <h2>Status</h2>
+  {% if ai.source %}
+  <p><span class="badge tone-ok">Connected</span> {{ 'Claude' if ai.provider == 'anthropic' else 'Gemini' }} · model <strong>{{ ai.model }}</strong>{% if ai.fallback %}, fallback {{ ai.fallback }}{% endif %} · key {{ ai.hint or 'set' }} · from {{ 'this page' if ai.source == 'app' else 'the .env file' }}{% if ai.saved_at %} (saved {{ ai.saved_at }}){% endif %}.</p>
+  {% else %}<p><span class="badge">Not connected</span> The app works without AI: you can type, paste and edit everything yourself.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <h2>Claude API key</h2>
+  <form action="/settings/ai" method="post" class="form-grid" data-once>
+    <label class="wide">API key<input name="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="{{ 'Leave empty to keep the saved key ' ~ ai.hint if ai.source == 'app' else 'sk-ant-…' }}"><small>Create one at console.anthropic.com › API keys. It is stored encrypted on this computer and never shown again or put in backups.</small></label>
+    <fieldset class="wide"><legend>Model</legend>
+      {% for id, label in models.items() %}<label class="check-line"><input type="radio" name="model" value="{{ id }}" {{ 'checked' if (ai.model == id) or (ai.model not in models and loop.first) }}> {{ label }}</label>{% endfor %}
+      <small>If the chosen model is busy, the other one is used automatically.</small>
+    </fieldset>
+    <div class="form-actions"><button class="btn primary" name="action" value="test">Test and save</button><button class="btn" name="action" value="save">Save without testing</button></div>
+  </form>
+  {% if ai.source == 'app' %}<form action="/settings/ai" method="post" data-confirm="Remove the saved Claude key from this app?"><input type="hidden" name="action" value="remove"><button class="btn sm danger">Remove saved key</button></form>{% endif %}
+</section>
+{% endblock %}

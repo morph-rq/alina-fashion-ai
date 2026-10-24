@@ -99,6 +99,9 @@ form (field names, hidden `next`, defaults), **T** = automated test, **R** = red
 | Create Ready batch | `POST /ready-batches` | Ready & shipping → New | Workspace | H |
 | Ready batch ledger | `/ready-batches` | Ready & shipping | Workspace | B |
 | Shipments (rule/explicit transport, CH exemption, fixed/suitcase/bag) | `/shipments`, `POST /shipments` | Ready & shipping | Workspace | B H R (own 7 % rate stored when "use the rule" is off) |
+| Tables by description (season/brand tables, custom tables), grid editing, row/column add, Excel export | — | Workspace › Tables `/tables`, `/tables/{id}` | Workspace | B T |
+| Edit product cells in place | — | Worksheet (colour/size/qty), Upload check (customer/colour/size/qty/wholesale/markup); `POST /worksheet/items/{id}/cell` | Workspace | B T |
+| Claude API key and model (Sonnet 5.5 / Haiku 5.5) | `.env` only | Settings › AI assistant `/settings/ai` | Settings | B T |
 | Correct shipment costs / exceptional expenses | `POST /shipments/{id}/costs`, `POST /expenses/{id}` | Ready & shipping › Edit costs / Edit | Workspace | B T |
 | Exceptional expenses | `POST /expenses` | Ready & shipping | Workspace | H |
 | Distributors, shipment groups, group settings, dispatch | `/groups`, `POST /distributors`, `/groups…` | Ready & shipping › Groups | Workspace | H R (dispatch refusal for ineligible products shown on a readable page) |

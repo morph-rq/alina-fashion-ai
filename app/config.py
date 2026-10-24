@@ -7,6 +7,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+# Claude models offered in Settings › AI. The other one is used automatically as the fallback.
+CLAUDE_MODELS = {
+    "claude-sonnet-5-5": "Claude Sonnet 5.5 — best quality (recommended)",
+    "claude-haiku-5-5": "Claude Haiku 5.5 — fastest and lowest cost",
+}
+_stored = {"stamp": None, "value": {}}
+
+
+def stored_ai_settings() -> dict:
+    """AI key and model saved from Settings (encrypted in data/private); {} when none or unreadable."""
+    try:
+        from app import secret_store
+        path = secret_store._path("ai-settings")
+        stamp = (str(path), path.stat().st_mtime_ns) if path.exists() else (str(path), None)
+        if stamp != _stored["stamp"]:
+            _stored["value"] = secret_store.load("ai-settings") if stamp[1] else {}
+            _stored["stamp"] = stamp
+        return _stored["value"]
+    except Exception:  # A damaged or foreign secret file must never stop the app; .env still works.
+        return {}
 
 
 class Settings(BaseSettings):
@@ -57,10 +77,13 @@ class Settings(BaseSettings):
 
     @property
     def active_ai_api_key(self) -> str:
-        return self.ai_api_key.strip() or self.anthropic_api_key.strip() or self.gemini_api_key.strip()
+        return (stored_ai_settings().get("api_key") or self.ai_api_key.strip() or self.anthropic_api_key.strip()
+                or self.gemini_api_key.strip())
 
     @property
     def active_ai_provider(self) -> str:
+        if stored_ai_settings().get("api_key"):
+            return "anthropic"
         explicit = self.ai_provider.strip().casefold()
         if explicit in {"anthropic", "claude"}:
             return "anthropic"
@@ -71,15 +94,22 @@ class Settings(BaseSettings):
 
     @property
     def active_ai_model(self) -> str:
+        stored = stored_ai_settings()
+        if stored.get("api_key") and stored.get("model") in CLAUDE_MODELS:
+            return stored["model"]
         if self.ai_model.strip():
             return self.ai_model.strip()
-        return "claude-opus-5-5" if self.active_ai_provider == "anthropic" else self.gemini_model.strip()
+        return "claude-sonnet-5-5" if self.active_ai_provider == "anthropic" else self.gemini_model.strip()
 
     @property
     def active_ai_fallback_models(self) -> str:
+        if stored_ai_settings().get("api_key"):
+            return ",".join(m for m in CLAUDE_MODELS if m != self.active_ai_model)
         if self.ai_fallback_models.strip():
             return self.ai_fallback_models.strip()
-        return "claude-sonnet-5-5" if self.active_ai_provider == "anthropic" else self.gemini_fallback_models.strip()
+        if self.active_ai_provider == "anthropic":
+            return ",".join(m for m in CLAUDE_MODELS if m != self.active_ai_model)
+        return self.gemini_fallback_models.strip()
 
 
 settings = Settings()

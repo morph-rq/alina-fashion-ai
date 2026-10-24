@@ -671,4 +671,30 @@ class OutboxItem(Base):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CustomTable(Base):
+    """A free-form operator table (suppliers, contacts, to-do lists). Never feeds accounting."""
+    __tablename__ = "custom_tables"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    # [{"key": "c1", "name": "Phone", "type": "text|number|money|date"}]; keys never change once created.
+    columns_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    rows: Mapped[list[CustomTableRow]] = relationship(back_populates="table", cascade="all, delete-orphan",
+                                                     order_by="CustomTableRow.position")
+
+
+class CustomTableRow(Base):
+    __tablename__ = "custom_table_rows"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    table_id: Mapped[int] = mapped_column(ForeignKey("custom_tables.id"), index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    values_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    __mapper_args__ = {"version_id_col": revision}
+    table: Mapped[CustomTable] = relationship(back_populates="rows")
+
+
 ModelDict = dict[str, Any]

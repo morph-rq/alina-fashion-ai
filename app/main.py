@@ -2319,5 +2319,9 @@ from app.ui_routes import install_ui
 install_ui(app, templates, context)
 from app.upload_check import install_upload_check
 install_upload_check(app, templates, context)
+from app.tables_routes import install_tables
+install_tables(app, templates, context)
+from app.ai_settings import install_ai_settings
+install_ai_settings(app, templates, context)
 # Register background job handlers and schedulers.
 from app import outbox as _outbox, sync as _sync  # noqa: E402,F401

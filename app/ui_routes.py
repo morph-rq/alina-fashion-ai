@@ -198,4 +198,5 @@ def install_ui(app, templates, context):
             recovery=outbox.recovery_status(db),
             last_audit=db.scalar(select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(1)),
             protected_changes=db.scalar(select(func.count()).select_from(ImportChange).where(ImportChange.status == "Review")) or 0,
+            ai_status=__import__("app.ai_settings", fromlist=["status"]).status(),
         ))

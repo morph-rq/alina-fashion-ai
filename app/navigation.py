@@ -25,12 +25,14 @@ WORKSPACE_VIEWS = (
     ("brands", "Brands", "/brands"),
     ("logistics", "Ready & shipping", "/logistics"),
     ("money", "Money", "/money"),
+    ("tables", "Tables", "/tables"),
 )
 _VIEW_PREFIXES = {
     "products": ("/worksheet", "/excel", "/import", "/imports", "/product-images"),
     "brands": ("/brands", "/seasons", "/orders", "/manual-entry"),
     "logistics": ("/logistics", "/ready-batches", "/shipments", "/groups"),
     "money": ("/money", "/payments", "/credits"),
+    "tables": ("/tables",),
 }
 
 

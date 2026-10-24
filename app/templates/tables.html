@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Tables{% endblock %}
+{% block content %}
+{{ ui.workspace_bar() }}
+<header class="page-header"><div><h1>Tables</h1><p class="page-sub">Describe the table you need in your own words. You see a draft first; nothing is created until you confirm.</p></div></header>
+{% if request.query_params.get('deleted') %}<div class="notice ok" role="status"><span class="notice-icon" aria-hidden="true">✓</span><div><strong>Table deleted.</strong><p>Its rows are kept in the audit history.</p></div></div>{% endif %}
+{% if error is defined and error %}<div class="notice danger" role="alert"><span class="notice-icon" aria-hidden="true">!</span><div><strong>{{ error }}</strong></div></div>{% endif %}
+
+<section class="panel describe-panel" aria-labelledby="describe-title">
+  <h2 id="describe-title">Describe a table</h2>
+  <form action="/tables/plan" method="post" class="describe-form" data-once>
+    <label for="table-description" class="sr-only">Table description</label>
+    <textarea id="table-description" name="description" rows="3" required maxlength="6000" placeholder="New season FW27 with brands Atelier Nord and Lumen, 30% markup, 50/50 prepayment&#10;or: a table of suppliers with name, phone, email, minimum order, next visit date">{{ description if description is defined else '' }}</textarea>
+    <div class="describe-actions"><button class="btn primary">Draft the table</button>
+      <span class="muted">Mention a season (SS27, FW26…) for order tables; anything else becomes a custom table. You can paste example rows on the next lines.</span></div>
+  </form>
+</section>
+
+{% if plan is defined %}
+<section class="panel plan-panel" aria-labelledby="plan-title">
+  <div class="section-head"><div><h2 id="plan-title">Draft: {{ plan.title or plan.season or 'New table' }}</h2>{% if plan.notes %}<p>{{ plan.notes }}</p>{% endif %}</div><span class="badge tone-info">Not created yet</span></div>
+  {% if plan.kind == 'season' %}
+  <form action="/tables/season" method="post" data-once data-guard>
+    <label class="plan-name">Season<input name="season" value="{{ plan.season or '' }}" required maxlength="30"></label>
+    <div class="sheet-scroll"><table class="sheet-grid plan-grid">
+      <thead><tr><th class="rownum"></th><th>Brand table</th><th>Markup %</th><th>Initial payment %</th><th>Transport %</th></tr></thead>
+      <tbody>{% for b in plan.brands + [none, none] %}<tr><td class="rownum">{{ loop.index }}</td>
+        <td><input name="brand_name" value="{{ b.name if b else '' }}" placeholder="{{ 'Brand name' if not b }}" aria-label="Brand {{ loop.index }}"></td>
+        <td><input name="markup" inputmode="decimal" value="{{ b.markup_percent|plain if b and b.markup_percent is not none else '' }}" placeholder="35" aria-label="Markup {{ loop.index }}"></td>
+        <td><input name="initial" inputmode="decimal" value="{{ b.initial_percent|plain if b and b.initial_percent is not none else '' }}" placeholder="50" aria-label="Initial payment {{ loop.index }}"></td>
+        <td><input name="transport" inputmode="decimal" value="{{ b.transport_percent|plain if b and b.transport_percent is not none else '' }}" placeholder="5" aria-label="Transport {{ loop.index }}"></td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="muted">Empty percentages use 35% markup, 50% initial payment (the rest when goods are Ready) and 5% transport (CH exempt). Brands that already have a table in this season are left exactly as they are.</p>
+    <div class="form-actions"><button class="btn primary">Create season and brand tables</button><a class="btn quiet" href="/tables">Discard draft</a></div>
+  </form>
+  {% else %}
+  <form action="/tables/custom" method="post" data-once data-guard>
+    <input type="hidden" name="description" value="{{ description if description is defined else '' }}">
+    <input type="hidden" name="rows_json" value='{{ plan.rows|tojson }}'>
+    <label class="plan-name">Table name<input name="name" value="{{ plan.title }}" required maxlength="120"></label>
+    <div class="sheet-scroll"><table class="sheet-grid plan-grid">
+      <thead><tr><th class="rownum"></th><th>Column</th><th>Type</th></tr></thead>
+      <tbody>{% for c in plan.columns + [none, none, none] %}<tr><td class="rownum">{{ loop.index }}</td>
+        <td><input name="column_name" value="{{ c.name if c else '' }}" placeholder="{{ 'Add a column' if not c }}" aria-label="Column {{ loop.index }} name" maxlength="60"></td>
+        <td><select name="column_type" aria-label="Column {{ loop.index }} type">{% for t in column_types %}<option {{ 'selected' if c and c.type == t }}>{{ t }}</option>{% endfor %}</select></td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if plan.rows %}<p class="muted">{{ plan.rows|length }} row{{ '' if plan.rows|length == 1 else 's' }} from your description will be added; you can edit them in the table.</p>{% endif %}
+    <div class="form-actions"><button class="btn primary">Create table</button><a class="btn quiet" href="/tables">Discard draft</a></div>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="section" aria-labelledby="custom-title">
+  <div class="section-head"><div><h2 id="custom-title">Your tables</h2><p>Free-form tables for suppliers, contacts, samples or to-dos. They never change orders or money.</p></div></div>
+  {% if tables %}<div class="sheet-scroll"><table class="sheet-grid">
+    <thead><tr><th class="rownum"></th><th>Table</th><th>Columns</th><th class="num">Rows</th><th>Updated</th><th></th></tr></thead>
+    <tbody>{% for t in tables %}<tr><td class="rownum">{{ loop.index }}</td><td><a href="/tables/{{ t.id }}"><strong>{{ t.name }}</strong></a></td><td class="wrap">{{ columns_of(t)|map(attribute='name')|join(', ') }}</td><td class="num">{{ row_counts[t.id] }}</td><td>{{ t.updated_at.strftime('%Y-%m-%d') if t.updated_at else '' }}</td><td><a class="btn sm quiet" href="/tables/{{ t.id }}/export.xlsx">{{ ui.icon('download') }}Excel</a></td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">No custom tables yet.</p>{% endif %}
+</section>
+
+<section class="section" aria-labelledby="order-tables-title">
+  <div class="section-head"><div><h2 id="order-tables-title">Order tables by season</h2><p>Each season has one table per brand. Open a season to add goods.</p></div></div>
+  {% if seasons %}<nav class="chips" aria-label="Seasons">{% for s in seasons %}<a class="chip" href="/seasons/{{ s.name|urlencode }}">{{ s.name }} <span class="n">{{ s.orders|length }}</span></a>{% endfor %}</nav>
+  {% else %}<p class="muted">No seasons yet. Describe one above, for example “New season FW27 with brands …”.</p>{% endif %}
+</section>
+{% endblock %}

@@ -149,6 +149,31 @@ in-place edits.
   In process, returned with "Updated 6"), Excel export (200, xlsx) and the cost drawer on desktop; the check page
   on a 375 px phone without sideways scrolling. Saving the check to a real Drive was not tested (no account).
 
+## Tables by description, Excel-style editing, Claude settings (2026-10-24)
+
+* **Workspace › Tables** (`/tables`, `app/tables_routes.py`, `app/table_planner.py`): describe a table; AI (or a
+  built-in parser when AI is off) drafts either a season with brand tables (Season, Brand, Brand + Season rule,
+  Order; existing tables and rules are never overwritten) or a free-form custom table (named, typed columns,
+  optional example rows). Nothing is created before **Create**. Custom tables (`custom_tables`,
+  `custom_table_rows`) have a spreadsheet grid with column letters and row numbers, click-to-edit cells (Enter /
+  Tab save, Esc cancels, typed columns validated, row revision prevents overwriting newer values), add rows,
+  add rows by describing or pasting them, add columns, delete rows/tables (audited) and `.xlsx` export. They never
+  feed accounting.
+* **Edit in cells:** worksheet (colour, size, quantity) and upload check (customer code, colour, size, quantity,
+  wholesale, markup) save one cell at a time through `item_service.change_item` with the item revision; Ready or
+  shipped money fields are refused there and stay in the product editor, which records a correction reason.
+* **Spreadsheet look** for every table: grid lines, grey header, frozen header, Excel-green focus; on phones the
+  Workspace switch is one swipeable row.
+* **Settings › AI assistant** (`/settings/ai`, `app/ai_settings.py`): paste a Claude key (stored with
+  `secret_store`, never shown back, excluded from backups), choose Claude Sonnet 5.5 or Claude Haiku 5.5, test it.
+  A key saved here overrides `.env`. Claude defaults changed from Opus 5.5 to **Sonnet 5.5 with Haiku 5.5 as
+  fallback** (user request); `FASHION_AI_MODEL` still overrides when the key comes from `.env`.
+* Setup: `requirements.txt` now lists `cryptography` (it was only available through the shared interpreter);
+  `setup.ps1` creates `.venv`; `scripts/run.ps1` prefers the project's own `.venv`. README has download steps.
+* Checked: 268 tests. In the isolated preview (narrow pane ≈ phone width): described a supplier table with an example
+  row → draft → created → edited the Phone cell (saved, survived reload); edited a size in the upload check; AI page
+  and Tables view rendered. Not checked: a real Claude key (tested with a simulated API only).
+
 ## Remaining work and decisions
 
 * Connect a real Google account and verify Drive/Gmail end to end (needs the account owner).

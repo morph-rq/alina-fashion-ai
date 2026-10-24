@@ -383,4 +383,90 @@
     });
     $$('[data-ai-prompt]').forEach(button => button.addEventListener('click', () => ask(button.textContent)));
   }
+
+  /* ---------- Spreadsheet cells: click or type to edit, Enter/Tab saves, Esc cancels ---------- */
+  const sheetStatus = (() => {
+    let box = document.getElementById('sheet-status');
+    if (!box) { box = document.createElement('div'); box.id = 'sheet-status'; box.className = 'sheet-status'; box.setAttribute('role', 'status'); box.setAttribute('aria-live', 'polite'); document.body.append(box); }
+    let timer;
+    return (message, error = false) => { box.textContent = message; box.classList.toggle('error', error); box.classList.add('show'); clearTimeout(timer); timer = setTimeout(() => box.classList.remove('show'), error ? 6000 : 1600); };
+  })();
+  const editableCells = row => $$('[data-edit-key]', row);
+  const moveTo = (cell, direction) => {
+    const row = cell.closest('[data-edit-url]');
+    if (!row) return;
+    let target;
+    if (direction === 'right') { const cells = editableCells(row); target = cells[cells.indexOf(cell) + 1]; }
+    else if (direction === 'down') {
+      let next = row.nextElementSibling;
+      while (next && !next.matches('[data-edit-url]')) next = next.nextElementSibling;
+      target = next && next.querySelector(`[data-edit-key="${cell.dataset.editKey}"]`);
+    }
+    if (target) { target.focus(); startEdit(target); }
+  };
+  function startEdit(cell, firstKey) {
+    if (cell.querySelector('input')) return;
+    const row = cell.closest('[data-edit-url]');
+    if (!row) return;
+    const original = cell.dataset.value ?? cell.textContent.trim();
+    const input = document.createElement('input');
+    input.className = 'cell-input';
+    input.value = firstKey ?? original;
+    if (cell.dataset.type === 'date') input.placeholder = 'YYYY-MM-DD';
+    if (['number', 'money'].includes(cell.dataset.type)) input.inputMode = 'decimal';
+    input.setAttribute('aria-label', cell.getAttribute('aria-label') || 'Cell');
+    cell.classList.add('editing');
+    cell.replaceChildren(input);
+    input.focus();
+    if (firstKey === undefined) input.select();
+    let done = false;
+    const finish = async (move) => {
+      if (done) return;
+      done = true;
+      const value = input.value.trim();
+      cell.classList.remove('editing');
+      if (value === original) { cell.textContent = original; if (move) moveTo(cell, move); else cell.focus(); return; }
+      cell.textContent = value;
+      cell.classList.add('saving');
+      try {
+        const response = await fetch(row.dataset.editUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ row_id: row.dataset.rowId, key: cell.dataset.editKey, field: cell.dataset.editKey, value, revision: row.dataset.revision }) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || data.detail || 'Not saved.');
+        cell.textContent = data.value ?? value;
+        cell.dataset.value = data.value ?? value;
+        if (data.revision !== undefined) row.dataset.revision = data.revision;
+        cell.classList.remove('cell-error');
+        if (cell.textContent) cell.classList.remove('cell-missing');
+        cell.removeAttribute('title');
+        cell.classList.add('saved');
+        setTimeout(() => cell.classList.remove('saved'), 900);
+        sheetStatus('Saved');
+      } catch (error) {
+        cell.textContent = original;
+        cell.classList.add('cell-error');
+        cell.title = error.message;
+        sheetStatus(error.message, true);
+      } finally {
+        cell.classList.remove('saving');
+      }
+      if (move) moveTo(cell, move); else cell.focus();
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish('down'); }
+      else if (event.key === 'Tab') { event.preventDefault(); finish(event.shiftKey ? null : 'right'); }
+      else if (event.key === 'Escape') { done = true; cell.classList.remove('editing'); cell.textContent = original; cell.focus(); }
+    });
+    input.addEventListener('blur', () => finish(null));
+  }
+  document.addEventListener('click', event => {
+    const cell = event.target.closest('[data-edit-key]');
+    if (cell && !event.target.closest('a, button, input, select') && cell.closest('[data-edit-url]')) startEdit(cell);
+  });
+  document.addEventListener('keydown', event => {
+    const cell = event.target.closest?.('[data-edit-key]');
+    if (!cell || event.target !== cell) return;
+    if (event.key === 'Enter' || event.key === 'F2') { event.preventDefault(); startEdit(cell); }
+    else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); startEdit(cell, event.key); }
+  });
 })();
